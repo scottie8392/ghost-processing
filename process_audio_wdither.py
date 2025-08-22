@@ -101,7 +101,7 @@ def is_entirely_silent(audio_file, silence_thresh, min_silence_len, min_non_sile
         logging.error(f"Error in silence detection for {audio_file}: {e}")
         return False
 
-# Resample to 48kHz (high-quality with dither via SoX)
+# Resample to 48kHz (high-quality with dither via SoX, no normalization)
 def resample_audio(audio_file, dest_file, dry_run):
     if dry_run:
         logging.info(f"[DRY RUN] Would resample {audio_file} to {dest_file}")
@@ -109,9 +109,8 @@ def resample_audio(audio_file, dest_file, dry_run):
     try:
         cmd = [
             "sox", audio_file, dest_file,
-            "rate", "-v", "48000",
-            "dither", "-s",
-            "norm", "-0.1"
+            "rate", "-v", "48k",
+            "dither", "-s"
         ]
         subprocess.run(cmd, check=True, capture_output=True)
         return True

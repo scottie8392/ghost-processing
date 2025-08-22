@@ -1,0 +1,16 @@
+source_dir: "/Users/scottie/Library/Containers/nz.co.pixeleyes.AutoMounter/Data/Mounts/Local-JUPITER/NFS/Stems/_Ghost Tracks/PT Exports/Boston"  # Source directory to process/watch (full NFS mount path)
+dest_base: "/Users/scottie/Library/Containers/nz.co.pixeleyes.AutoMounter/Data/Mounts/Local-JUPITER/NFS/Stems/_Ghost Tracks"  # Fixed base for creating new dest dir (full NFS mount path)
+dry_run: false  # If true, simulate actions without converting/creating files
+watch_mode: false  # If true, monitor source for new/stable files
+silence_thresh: -50.0  # dB threshold for silence
+min_silence_len: 200  # Min ms for a silent chunk
+min_non_silent_len: 10  # Min ms for a non-silent blip to keep file
+stability_wait_sec: 60  # Seconds file size must be unchanged before processing in watch mode
+max_workers: 6  # Max multiprocessing workers (keep low to avoid overload)
+verbose: true  # True for debug logging
+log_dir: '/Users/scottie/Documents/projects/ghost-processing/logs'
+mount_type: "nfs"  # "smb" or "nfs" for auto-remount
+nfs_server_path: "10.11.24.24:/volume1/Stems"  # NFS server/export path (use hostname or IP:/volume1/Stems)
+mount_point: "/Users/scottie/Library/Containers/nz.co.pixeleyes.AutoMounter/Data/Mounts/Jupiter Stems/NFS"  # Full mount point base on Mac
+# enable_script_remount: false  # Set to true to use script's remount; false to rely on AutoMounter
+# Optional: Add ignore_patterns later if needed, e.g., ["*.tmp"]
