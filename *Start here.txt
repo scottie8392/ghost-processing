@@ -1,0 +1,13 @@
+# move to dir
+cd ~/Documents/projects/ghost-processing
+
+# activate venv
+source ghost-processing-venv/bin/activate
+
+# Change config file
+
+# process
+python process_audio_wdither.py --config config.yaml
+
+# confirm
+python verify_audio_processing.py --config config.yaml
