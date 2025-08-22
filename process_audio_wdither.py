@@ -164,8 +164,8 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
             if e.errno in [2, 57]:  # No such file / Socket not connected
                 logging.warning(f"Disconnect detected on {file_path} (attempt {attempt+1}/3): {e}")
                 # if remount_network(config):
-                #     time.sleep(5)  # Wait for remount to stabilize
-                #     continue
+                time.sleep(5)  # Wait for remount to stabilize
+                continue
             raise  # Re-raise if not disconnect or retries exhausted
     logging.error(f"Failed after 3 retries: {file_path}")
     return None
