@@ -81,7 +81,17 @@
     }
     input:focus { border-color: var(--accent); }
 
-    .hint { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+    .hint { font-size: 11px; color: var(--text-dim); margin-top: 6px; line-height: 1.7; }
+    .hint code {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: #aaa;
+      background: #1a1a1a;
+      border: 1px solid #2e2e2e;
+      border-radius: 3px;
+      padding: 0 4px;
+    }
+    .hint .ex { display: block; margin-top: 3px; }
 
     /* Row layout */
     .row { display: flex; gap: 14px; }
@@ -219,7 +229,11 @@
         <option value="{{ path }}">
         {% endfor %}
       </datalist>
-      <div class="hint">Full path to the folder of stems you want to convert. Your last 10 are saved.</div>
+      <div class="hint">
+        Full path to the session folder containing the stems you want to convert. Your last 10 are saved as suggestions.
+        <span class="ex">Mac: <code>/Users/you/Library/Containers/nz.co.pixeleyes.AutoMounter/Data/Mounts/Local-JUPITER/NFS/Stems/_Ghost Tracks/PT Exports/Boston</code></span>
+        <span class="ex">Synology Docker: <code>/data/stems/_Ghost Tracks/PT Exports/Boston</code></span>
+      </div>
     </div>
 
     <div class="field">
@@ -227,7 +241,12 @@
       <input type="text" id="dest_base"
              placeholder="/path/to/output/base"
              value="{{ profile.dest_base or '' }}">
-      <div class="hint">A subfolder named after your session (with a <code>-48</code> suffix) will be created here.</div>
+      <div class="hint">
+        The folder where output will land. A subfolder named after your session + <code>-48</code> is created automatically.
+        <span class="ex">Mac: <code>/Users/you/Library/Containers/nz.co.pixeleyes.AutoMounter/Data/Mounts/Local-JUPITER/NFS/Stems/_Ghost Tracks</code></span>
+        <span class="ex">Synology Docker: <code>/data/stems/_Ghost Tracks</code></span>
+        <span class="ex">Result: <code>…/_Ghost Tracks/Boston-48/</code> containing converted files named like <code>Drums-48.wav</code></span>
+      </div>
     </div>
 
     <div class="row">
@@ -235,6 +254,7 @@
         <label class="field-label">Workers</label>
         <input type="number" id="max_workers" min="1" max="16"
                value="{{ profile.max_workers or 6 }}">
+        <div class="hint">Parallel jobs. More = faster, but harder on your network. Mac: <code>6</code> is good. Synology: <code>4</code> is safer.</div>
       </div>
       <div class="field" style="display:flex; align-items:flex-end; padding-bottom:1px;">
         <div class="checks">
@@ -258,11 +278,13 @@
             <label class="field-label">Target Sample Rate (Hz)</label>
             <input type="number" id="target_sample_rate"
                    value="{{ profile.target_sample_rate or 48000 }}">
+            <div class="hint">Output sample rate. Example: <code>48000</code> (48kHz). Files already at this rate are skipped automatically.</div>
           </div>
           <div class="field">
             <label class="field-label">Silence Threshold (dB)</label>
             <input type="number" id="silence_thresh" step="0.5"
                    value="{{ profile.silence_thresh or -50.0 }}">
+            <div class="hint">Files quieter than this are rejected. Example: <code>-50.0</code> — lower = stricter. Most empty stems land well below this.</div>
           </div>
         </div>
         <div class="row">
@@ -270,11 +292,13 @@
             <label class="field-label">Min Silence Length (ms)</label>
             <input type="number" id="min_silence_len"
                    value="{{ profile.min_silence_len or 200 }}">
+            <div class="hint">How long a gap must be to count as silence. Example: <code>200</code> ms.</div>
           </div>
           <div class="field">
             <label class="field-label">Min Non-Silent Length (ms)</label>
             <input type="number" id="min_non_silent_len"
                    value="{{ profile.min_non_silent_len or 10 }}">
+            <div class="hint">Shortest blip that counts as audio. Example: <code>10</code> ms — files with only shorter blips are rejected.</div>
           </div>
         </div>
       </div>
