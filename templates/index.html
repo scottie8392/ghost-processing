@@ -67,7 +67,8 @@
     }
 
     input[type="text"],
-    input[type="number"] {
+    input[type="number"],
+    select {
       width: 100%;
       background: var(--surface2);
       border: 1px solid var(--border);
@@ -78,8 +79,17 @@
       padding: 8px 10px;
       outline: none;
       transition: border-color 0.15s;
+      appearance: none;
     }
-    input:focus { border-color: var(--accent); }
+    select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23777'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 28px;
+      cursor: pointer;
+    }
+    select option { background: #252525; }
+    input:focus, select:focus { border-color: var(--accent); }
 
     .hint { font-size: 11px; color: var(--text-dim); margin-top: 6px; line-height: 1.7; }
     .hint code {
@@ -98,7 +108,7 @@
     .row .field { flex: 1; }
 
     /* Checkboxes */
-    .checks { display: flex; gap: 20px; align-items: center; padding-top: 2px; }
+    .checks { display: flex; gap: 20px; align-items: center; padding-top: 2px; flex-wrap: wrap; }
     .check-label {
       display: flex;
       align-items: center;
@@ -127,10 +137,28 @@
     details summary::before { content: "▶"; font-size: 9px; transition: transform 0.15s; }
     details[open] summary::before { transform: rotate(90deg); }
     details summary:hover { color: var(--text); }
-    details .detail-body { margin-top: 14px; }
+    details .detail-body { margin-top: 16px; }
+
+    /* Section dividers inside advanced */
+    .adv-section {
+      border-top: 1px solid var(--border);
+      margin-top: 16px;
+      padding-top: 14px;
+    }
+    .adv-section-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 12px;
+    }
+
+    /* Hidden fields */
+    .hidden { display: none; }
 
     /* Buttons */
-    .btn-row { display: flex; gap: 10px; margin-top: 18px; }
+    .btn-row { display: flex; gap: 10px; margin-top: 18px; align-items: center; }
     button {
       padding: 10px 22px;
       border: none;
@@ -152,6 +180,17 @@
       border: 1px solid var(--border);
     }
     .btn-stop:hover:not(:disabled) { border-color: var(--error); color: var(--error); }
+
+    .btn-reset {
+      background: transparent;
+      color: var(--text-dim);
+      border: 1px solid transparent;
+      font-size: 11px;
+      font-weight: 500;
+      padding: 6px 10px;
+      margin-top: 4px;
+    }
+    .btn-reset:hover { color: var(--warn); border-color: var(--border); }
 
     /* Output */
     .output-bar {
@@ -200,7 +239,7 @@
       font-style: italic;
     }
 
-    .ll       { padding: 1px 0; word-break: break-all; }
+    .ll         { padding: 1px 0; word-break: break-all; }
     .ll.error   { color: var(--error); }
     .ll.warn    { color: var(--warn); }
     .ll.success { color: var(--success); }
@@ -245,7 +284,7 @@
         The folder where output will land. A subfolder named after your session + <code>-48</code> is created automatically.
         <span class="ex">Mac: <code>/Users/you/Library/Containers/nz.co.pixeleyes.AutoMounter/Data/Mounts/Local-JUPITER/NFS/Stems/_Ghost Tracks</code></span>
         <span class="ex">Synology Docker: <code>/data/stems/_Ghost Tracks</code></span>
-        <span class="ex">Result: <code>…/_Ghost Tracks/Boston-48/</code> containing converted files named like <code>Drums-48.wav</code></span>
+        <span class="ex">Result: <code>…/_Ghost Tracks/Boston-48/</code> with files named like <code>Drums-48.wav</code></span>
       </div>
     </div>
 
@@ -254,7 +293,7 @@
         <label class="field-label">Workers</label>
         <input type="number" id="max_workers" min="1" max="16"
                value="{{ profile.max_workers or 6 }}">
-        <div class="hint">Parallel jobs. More = faster, but harder on your network. Mac: <code>6</code> is good. Synology: <code>4</code> is safer.</div>
+        <div class="hint">Parallel jobs. Mac: <code>6</code>. Synology: <code>4</code>.</div>
       </div>
       <div class="field" style="display:flex; align-items:flex-end; padding-bottom:1px;">
         <div class="checks">
@@ -270,21 +309,25 @@
       </div>
     </div>
 
+    <!-- Advanced -->
     <details>
       <summary>Advanced</summary>
       <div class="detail-body">
+
+        <!-- Audio Conversion -->
+        <div class="adv-section-label">Audio Conversion</div>
         <div class="row">
           <div class="field">
             <label class="field-label">Target Sample Rate (Hz)</label>
             <input type="number" id="target_sample_rate"
                    value="{{ profile.target_sample_rate or 48000 }}">
-            <div class="hint">Output sample rate. Example: <code>48000</code> (48kHz). Files already at this rate are skipped automatically.</div>
+            <div class="hint">Output sample rate. Default: <code>48000</code> (48kHz). Files already at this rate are skipped.</div>
           </div>
           <div class="field">
             <label class="field-label">Silence Threshold (dB)</label>
             <input type="number" id="silence_thresh" step="0.5"
-                   value="{{ profile.silence_thresh or -50.0 }}">
-            <div class="hint">Files quieter than this are rejected. Example: <code>-50.0</code> — lower = stricter. Most empty stems land well below this.</div>
+                   value="{{ profile.silence_thresh if profile.silence_thresh is not none else -50.0 }}">
+            <div class="hint">Files quieter than this are rejected. Default: <code>-50.0</code> dB. Lower = stricter.</div>
           </div>
         </div>
         <div class="row">
@@ -292,15 +335,100 @@
             <label class="field-label">Min Silence Length (ms)</label>
             <input type="number" id="min_silence_len"
                    value="{{ profile.min_silence_len or 200 }}">
-            <div class="hint">How long a gap must be to count as silence. Example: <code>200</code> ms.</div>
+            <div class="hint">How long a gap must be to count as silence. Default: <code>200</code> ms.</div>
           </div>
           <div class="field">
             <label class="field-label">Min Non-Silent Length (ms)</label>
             <input type="number" id="min_non_silent_len"
                    value="{{ profile.min_non_silent_len or 10 }}">
-            <div class="hint">Shortest blip that counts as audio. Example: <code>10</code> ms — files with only shorter blips are rejected.</div>
+            <div class="hint">Shortest audio blip that keeps a file. Default: <code>10</code> ms.</div>
           </div>
         </div>
+
+        <!-- Watch Mode -->
+        <div class="adv-section">
+          <div class="adv-section-label">Watch Mode</div>
+          <div class="row">
+            <div class="field">
+              <div class="checks">
+                <label class="check-label">
+                  <input type="checkbox" id="watch_mode"
+                         {% if profile.watch_mode %}checked{% endif %}
+                         onchange="toggleWatchFields()">
+                  Enable Watch Mode
+                </label>
+              </div>
+              <div class="hint">Instead of a one-time batch run, continuously monitor the source folder and process new files as they appear.</div>
+            </div>
+            <div class="field" id="field_stability_wait" {% if not profile.watch_mode %}style="visibility:hidden"{% endif %}>
+              <label class="field-label">Stability Wait (sec)</label>
+              <input type="number" id="stability_wait_sec"
+                     value="{{ profile.stability_wait_sec or 60 }}">
+              <div class="hint">Seconds a file's size must be unchanged before it's processed. Default: <code>60</code>. Prevents processing mid-copy files.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Logging -->
+        <div class="adv-section">
+          <div class="adv-section-label">Logging</div>
+          <div class="field">
+            <label class="field-label">Log Directory</label>
+            <input type="text" id="log_dir"
+                   placeholder="(default: logs/ inside project folder)"
+                   value="{{ profile.log_dir or '' }}">
+            <div class="hint">Where log files are written. Leave blank to use the default <code>logs/</code> folder inside the project. Each run creates a timestamped file alongside the main log.</div>
+          </div>
+        </div>
+
+        <!-- Network / Remount -->
+        <div class="adv-section">
+          <div class="adv-section-label">Network / Remount</div>
+          <div class="field">
+            <label class="field-label">Mount Type</label>
+            <select id="mount_type" onchange="toggleNetworkFields()">
+              <option value=""    {% if not profile.mount_type %}selected{% endif %}>None (direct path / Docker)</option>
+              <option value="nfs" {% if profile.mount_type == 'nfs' %}selected{% endif %}>NFS</option>
+              <option value="smb" {% if profile.mount_type == 'smb' %}selected{% endif %}>SMB / Samba</option>
+            </select>
+            <div class="hint">Only needed if you want the script to remount the share on disconnect. Leave as <code>None</code> on Mac — AutoMounter handles this automatically.</div>
+          </div>
+
+          <div id="network_fields" class="{{ '' if profile.mount_type else 'hidden' }}">
+            <div class="row">
+              <div class="field">
+                <label class="field-label">NFS/SMB Server Path</label>
+                <input type="text" id="nfs_server_path"
+                       placeholder="10.11.24.24:/volume1/Stems"
+                       value="{{ profile.nfs_server_path or '' }}">
+                <div class="hint">NFS: <code>10.11.24.24:/volume1/Stems</code> &nbsp; SMB: <code>//10.11.24.24/Stems</code></div>
+              </div>
+              <div class="field">
+                <label class="field-label">Mount Point</label>
+                <input type="text" id="mount_point"
+                       placeholder="/path/to/local/mount"
+                       value="{{ profile.mount_point or '' }}">
+                <div class="hint">Local path where the share is (or should be) mounted. Example: <code>/mnt/stems</code></div>
+              </div>
+            </div>
+            <div class="field" style="margin-top:4px;">
+              <div class="checks">
+                <label class="check-label">
+                  <input type="checkbox" id="enable_script_remount"
+                         {% if profile.enable_script_remount %}checked{% endif %}>
+                  Enable Script Remount
+                </label>
+              </div>
+              <div class="hint">When checked, the script will attempt to force-remount the share on disconnect (requires sudo access). When unchecked, AutoMounter handles reconnection — recommended for Mac.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Reset button -->
+        <div style="margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px;">
+          <button class="btn-reset" onclick="resetToDefaults()">↺ Reset advanced settings to defaults</button>
+        </div>
+
       </div>
     </details>
 
@@ -334,6 +462,48 @@
   const btnRun    = document.getElementById('btn-run');
   const btnStop   = document.getElementById('btn-stop');
 
+  // Defaults mirror process_audio.py load_config() defaults
+  const DEFAULTS = {
+    target_sample_rate:  48000,
+    silence_thresh:      -50.0,
+    min_silence_len:     200,
+    min_non_silent_len:  10,
+    watch_mode:          false,
+    stability_wait_sec:  60,
+    log_dir:             '',
+    mount_type:          '',
+    nfs_server_path:     '',
+    mount_point:         '',
+    enable_script_remount: false,
+  };
+
+  function toggleWatchFields() {
+    const on = document.getElementById('watch_mode').checked;
+    document.getElementById('field_stability_wait').style.visibility = on ? 'visible' : 'hidden';
+  }
+
+  function toggleNetworkFields() {
+    const val = document.getElementById('mount_type').value;
+    document.getElementById('network_fields').classList.toggle('hidden', !val);
+  }
+
+  function resetToDefaults() {
+    if (!confirm('Reset all advanced settings to their defaults?')) return;
+    document.getElementById('target_sample_rate').value  = DEFAULTS.target_sample_rate;
+    document.getElementById('silence_thresh').value      = DEFAULTS.silence_thresh;
+    document.getElementById('min_silence_len').value     = DEFAULTS.min_silence_len;
+    document.getElementById('min_non_silent_len').value  = DEFAULTS.min_non_silent_len;
+    document.getElementById('watch_mode').checked        = DEFAULTS.watch_mode;
+    document.getElementById('stability_wait_sec').value  = DEFAULTS.stability_wait_sec;
+    document.getElementById('log_dir').value             = DEFAULTS.log_dir;
+    document.getElementById('mount_type').value          = DEFAULTS.mount_type;
+    document.getElementById('nfs_server_path').value     = DEFAULTS.nfs_server_path;
+    document.getElementById('mount_point').value         = DEFAULTS.mount_point;
+    document.getElementById('enable_script_remount').checked = DEFAULTS.enable_script_remount;
+    toggleWatchFields();
+    toggleNetworkFields();
+  }
+
   logEl.addEventListener('scroll', () => {
     autoScroll = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 30;
   });
@@ -355,24 +525,31 @@
 
   function classify(msg) {
     const m = msg.toLowerCase();
-    if (m.includes('error') || m.includes('failed'))            return 'error';
-    if (m.includes('warning') || m.includes('warn'))            return 'warn';
-    if (m.includes('converted:') || m.includes('passed'))       return 'success';
-    if (m.includes('skip') || m.includes('already at'))         return 'dim';
+    if (m.includes('error') || m.includes('failed'))       return 'error';
+    if (m.includes('warning') || m.includes('warn'))       return 'warn';
+    if (m.includes('converted:') || m.includes('passed'))  return 'success';
+    if (m.includes('skip') || m.includes('already at'))    return 'dim';
     return '';
   }
 
   function getConfig() {
     return {
-      source_dir:          document.getElementById('source_dir').value.trim(),
-      dest_base:           document.getElementById('dest_base').value.trim(),
-      max_workers:         parseInt(document.getElementById('max_workers').value) || 6,
-      dry_run:             document.getElementById('dry_run').checked,
-      verbose:             document.getElementById('verbose').checked,
-      target_sample_rate:  parseInt(document.getElementById('target_sample_rate').value) || 48000,
-      silence_thresh:      parseFloat(document.getElementById('silence_thresh').value) || -50.0,
-      min_silence_len:     parseInt(document.getElementById('min_silence_len').value) || 200,
-      min_non_silent_len:  parseInt(document.getElementById('min_non_silent_len').value) || 10,
+      source_dir:            document.getElementById('source_dir').value.trim(),
+      dest_base:             document.getElementById('dest_base').value.trim(),
+      max_workers:           parseInt(document.getElementById('max_workers').value) || 6,
+      dry_run:               document.getElementById('dry_run').checked,
+      verbose:               document.getElementById('verbose').checked,
+      target_sample_rate:    parseInt(document.getElementById('target_sample_rate').value) || 48000,
+      silence_thresh:        parseFloat(document.getElementById('silence_thresh').value) || -50.0,
+      min_silence_len:       parseInt(document.getElementById('min_silence_len').value) || 200,
+      min_non_silent_len:    parseInt(document.getElementById('min_non_silent_len').value) || 10,
+      watch_mode:            document.getElementById('watch_mode').checked,
+      stability_wait_sec:    parseInt(document.getElementById('stability_wait_sec').value) || 60,
+      log_dir:               document.getElementById('log_dir').value.trim(),
+      mount_type:            document.getElementById('mount_type').value || null,
+      nfs_server_path:       document.getElementById('nfs_server_path').value.trim() || null,
+      mount_point:           document.getElementById('mount_point').value.trim() || null,
+      enable_script_remount: document.getElementById('enable_script_remount').checked,
     };
   }
 
