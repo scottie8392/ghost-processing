@@ -1,3 +1,15 @@
+"""
+Ghost Processing — audio conversion pipeline
+
+Converts audio stems to a target sample rate (default 48kHz) using SoX with
+shaped dithering. Detects and rejects silent files. Supports batch and watch
+modes, parallel processing, NFS retry logic, and auto-verification.
+
+Usage:
+    python process_audio.py --config config.local.yaml
+    python process_audio.py --config config.docker.yaml
+"""
+
 import os
 import sys
 import time
@@ -7,8 +19,11 @@ import hashlib
 import json
 import signal
 import argparse
+import tempfile
+import subprocess
 from datetime import datetime
 from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError
+
 from tqdm import tqdm
 import psutil
 import yaml
@@ -16,62 +31,107 @@ from pydub import AudioSegment, silence
 from pydub.exceptions import CouldntDecodeError
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-import subprocess  # For remount
 
-# NEW: Global shutdown event for graceful worker signaling
-shutdown_event = None  # Initialize as None; set later
-
-# Global vars for interrupt handling (updated to be dynamic)
-ffmpeg_pids = []  # Still here but we'll use psutil primarily
-
-# NEW: Lock for synchronizing access to shared JSON files (progress/rejects) - Moved creation to __main__
+# Globals — initialized in __main__ after set_start_method to avoid fork issues
+shutdown_event = None
 file_lock = None
 
-# NEW: Initializer to ignore SIGINT in worker processes
+
 def ignore_sigint():
+    """Worker initializer: ignore SIGINT so the parent process handles shutdown."""
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
-# Configure logging (unchanged)
+
+# ---------------------------------------------------------------------------
+# Setup
+# ---------------------------------------------------------------------------
+
 def setup_logging(log_dir, verbose=False):
     os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, "process_audio.log")
+    run_ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    run_log = os.path.join(log_dir, f"run_{run_ts}.log")
+    main_log = os.path.join(log_dir, "process_audio.log")
     level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s: %(message)s",
-        handlers=[logging.FileHandler(log_file), logging.StreamHandler()],
-    )
-    return log_file
+    fmt = logging.Formatter("%(asctime)s %(levelname)s: %(message)s")
+    logger = logging.getLogger()
+    logger.setLevel(level)
+    for handler in [
+        logging.FileHandler(main_log),
+        logging.FileHandler(run_log),
+        logging.StreamHandler(),
+    ]:
+        handler.setFormatter(fmt)
+        logger.addHandler(handler)
+    logging.info(f"Run log: {run_log}")
+    return run_log
 
-# Load config (YAML) - UPDATED: Lower default max_workers
+
 def load_config(config_path):
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
-    # Override with env vars if set (for Docker)
+    # Environment variable overrides (useful for Docker)
     config["source_dir"] = os.getenv("SOURCE_DIR", config.get("source_dir"))
     config["dest_base"] = os.getenv("DEST_BASE", config.get("dest_base"))
     config["log_dir"] = os.getenv("LOG_DIR", config.get("log_dir", "/tmp/logs"))
-    # Defaults - CHANGED: Lower max_workers for safety
-    config["max_workers"] = config.get("max_workers", max(1, multiprocessing.cpu_count() // 4))  # e.g., 2 on 8-core
-    config["smb_url"] = config.get("smb_url", None)  # Optional for remount
-    config["mount_point"] = config.get("mount_point", None)  # Optional for remount
+    # Defaults for optional keys
+    config.setdefault("max_workers", max(1, multiprocessing.cpu_count() // 2))
+    config.setdefault("target_sample_rate", 48000)
+    config.setdefault("silence_thresh", -50.0)
+    config.setdefault("min_silence_len", 200)
+    config.setdefault("min_non_silent_len", 10)
+    config.setdefault("stability_wait_sec", 60)
+    config.setdefault("dry_run", False)
+    config.setdefault("watch_mode", False)
+    config.setdefault("verbose", False)
+    config.setdefault("mount_type", None)
+    config.setdefault("nfs_server_path", None)
+    config.setdefault("mount_point", None)
+    config.setdefault("enable_script_remount", False)
     return config
 
-# Remount SMB (unchanged)
-def remount_smb(smb_url, mount_point):
-    if smb_url and mount_point:
-        try:
-            subprocess.run(["umount", mount_point], check=False)  # Force unmount
-            os.makedirs(mount_point, exist_ok=True)  # Ensure dir exists
-            subprocess.run(["mount", "-t", "smbfs", smb_url, mount_point], check=True)
-            logging.info(f"Remounted SMB at {mount_point}")
-            return True
-        except subprocess.CalledProcessError as e:
-            logging.error(f"Remount failed: {e}")
-            return False
-    return False
 
-# File hash for integrity (unchanged)
+# ---------------------------------------------------------------------------
+# Network remount
+# ---------------------------------------------------------------------------
+
+def remount_network(config):
+    """
+    Attempt to remount the network share. Only called when enable_script_remount
+    is true — otherwise AutoMounter handles it automatically.
+    """
+    mount_point = config.get("mount_point")
+    mount_type = config.get("mount_type")
+    if not mount_point or not mount_type:
+        return False
+    try:
+        subprocess.run(["umount", "-f", mount_point], check=False)
+        os.makedirs(mount_point, exist_ok=True)
+        if mount_type == "nfs":
+            server_path = config.get("nfs_server_path")
+            if not server_path:
+                return False
+            subprocess.run(
+                ["mount", "-t", "nfs", "-o", "vers=4", server_path, mount_point],
+                check=True,
+            )
+        elif mount_type == "smb":
+            smb_url = config.get("smb_url")
+            if not smb_url:
+                return False
+            subprocess.run(["mount", "-t", "smbfs", smb_url, mount_point], check=True)
+        else:
+            return False
+        logging.info(f"Remounted {mount_type} at {mount_point}")
+        return True
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Remount failed: {e}")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Audio utilities
+# ---------------------------------------------------------------------------
+
 def file_hash(file_path):
     hasher = hashlib.md5()
     with open(file_path, "rb") as f:
@@ -79,113 +139,66 @@ def file_hash(file_path):
             hasher.update(chunk)
     return hasher.hexdigest()
 
-# Check if file is audio (.wav or .aiff) (unchanged)
+
 def is_audio_file(file_path):
     return file_path.lower().endswith((".wav", ".aiff"))
 
-# Silence detection (unchanged)
+
+def get_sample_rate(file_path):
+    """Return the sample rate in Hz using soxi, or None on failure."""
+    try:
+        result = subprocess.run(
+            ["soxi", "-r", file_path], capture_output=True, text=True, check=True
+        )
+        return int(result.stdout.strip())
+    except Exception:
+        return None
+
+
 def is_entirely_silent(audio_file, silence_thresh, min_silence_len, min_non_silent_len):
     try:
         audio = AudioSegment.from_file(audio_file)
-        non_silent_segments = silence.detect_nonsilent(
+        non_silent = silence.detect_nonsilent(
             audio, min_silence_len=min_non_silent_len, silence_thresh=silence_thresh
         )
-        return not bool(non_silent_segments)  # Silent if no non-silent segments
+        return not bool(non_silent)
     except CouldntDecodeError as e:
         logging.error(f"Decode error for {audio_file}: {e}")
         return False  # Treat as non-silent to avoid false rejects
     except Exception as e:
-        logging.error(f"Error in silence detection for {audio_file}: {e}")
+        logging.error(f"Silence detection error for {audio_file}: {e}")
         return False
 
-# Resample to 48kHz (UPDATED: Check shutdown_event)
-def resample_audio(audio_file, dest_file, dry_run):
-    if shutdown_event and shutdown_event.is_set():
-        logging.info(f"Shutdown signaled; skipping resample for {audio_file}")
-        return False
+
+def resample_audio(audio_file, dest_file, target_rate, dry_run):
     if dry_run:
-        logging.info(f"[DRY RUN] Would resample {audio_file} to {dest_file}")
+        logging.info(f"[DRY RUN] Would resample {audio_file} → {dest_file}")
         return True
     try:
-        audio = AudioSegment.from_file(audio_file)
-        if audio.frame_rate != 96000:
-            logging.warning(f"Skipping {audio_file}: Sample rate is {audio.frame_rate}Hz, not 96kHz")
-            return False
-        resampled = audio.set_frame_rate(48000)  # pydub uses high-quality sinc
-        resampled.export(dest_file, format="wav", codec="pcm_s24le")  # Force 24-bit signed PCM
+        cmd = ["sox", audio_file, dest_file, "rate", "-v", str(target_rate), "dither", "-s"]
+        subprocess.run(cmd, check=True, capture_output=True)
         return True
+    except subprocess.CalledProcessError as e:
+        logging.error(f"SoX error for {audio_file}: {e.stderr.decode()}")
+        return False
     except Exception as e:
         logging.error(f"Resample error for {audio_file}: {e}")
         return False
 
-# Process single file (UPDATED: Check shutdown_event, wrap in try for interrupt, add lock for progress read)
-def process_file(file_path, config, rejects_log, progress_log, dest_dir):
-    if shutdown_event and shutdown_event.is_set():
-        logging.info(f"Shutdown signaled; skipping {file_path}")
-        return None
-    try:
-        for attempt in range(3):  # Retry 3 times on disconnect
-            try:
-                if os.path.getsize(file_path) == 0:
-                    logging.warning(f"Skipping zero-byte file: {file_path}")
-                    append_log(rejects_log, {"path": file_path, "reason": "Zero-byte file", "timestamp": str(datetime.now())}, is_list=True)
-                    return None
 
-                rel_path = os.path.relpath(file_path, config["source_dir"])
-                base, ext = os.path.splitext(rel_path)
-                dest_path = os.path.join(dest_dir, f"{base}-48{ext}")
-                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+# ---------------------------------------------------------------------------
+# JSON log management
+# ---------------------------------------------------------------------------
 
-                # Check progress (skip if done and hash matches) - UPDATED: With lock
-                with file_lock:
-                    if os.path.exists(progress_log):
-                        try:
-                            with open(progress_log, "r") as f:
-                                progress = json.load(f)
-                        except json.JSONDecodeError as e:
-                            logging.error(f"Corrupt progress.json: {e} - resetting")
-                            progress = {}
-                    else:
-                        progress = {}
-                if rel_path in progress and progress[rel_path].get("status") == "converted":
-                    if os.path.exists(dest_path) and file_hash(file_path) == progress[rel_path].get("source_hash"):
-                        logging.info(f"Skipping {file_path}: Already converted")
-                        return None
-
-                # Silence detection
-                if is_entirely_silent(
-                    file_path, config["silence_thresh"], config["min_silence_len"], config["min_non_silent_len"]
-                ):
-                    append_log(rejects_log, {"path": file_path, "reason": "Entirely silent", "timestamp": str(datetime.now())}, is_list=True)
-                    return None
-
-                # Convert
-                if resample_audio(file_path, dest_path, config["dry_run"]):
-                    append_log(progress_log, {rel_path: {"status": "converted", "source_hash": file_hash(file_path), "timestamp": str(datetime.now())}}, is_list=False)
-                    return file_path
-                return None
-            except OSError as e:
-                if e.errno in [2, 57]:  # No such file / Socket not connected
-                    logging.warning(f"Disconnect detected on {file_path} (attempt {attempt+1}/3): {e}")
-                    if remount_smb(config["smb_url"], config["mount_point"]):
-                        time.sleep(5)  # Wait for remount to stabilize
-                        continue
-                raise  # Re-raise if not disconnect or retries exhausted
-        logging.error(f"Failed after 3 retries: {file_path}")
-        return None
-    except KeyboardInterrupt:
-        logging.info(f"Interrupt in worker for {file_path}; exiting")
-        return None
-
-# Append to JSON log (UPDATED: With lock for read-modify-write)
 def append_log(log_path, data, is_list=False):
+    """Atomic read-modify-write for JSON logs. Thread-safe via file_lock."""
     with file_lock:
         if os.path.exists(log_path):
             try:
                 with open(log_path, "r") as f:
                     logs = json.load(f)
             except json.JSONDecodeError as e:
-                logging.error(f"Corrupt log {log_path}: {e} - resetting")
+                logging.error(f"Corrupt {os.path.basename(log_path)}: {e} — resetting")
                 logs = [] if is_list else {}
         else:
             logs = [] if is_list else {}
@@ -195,61 +208,221 @@ def append_log(log_path, data, is_list=False):
             logs.append(data)
         else:
             logs.update(data)
-        with open(log_path, "w") as f:
-            json.dump(logs, f, indent=4)
+        dir_name = os.path.dirname(log_path) or "."
+        with tempfile.NamedTemporaryFile(mode="w", dir=dir_name, delete=False) as tmp:
+            json.dump(logs, tmp, indent=4)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.rename(tmp.name, log_path)
 
-# Collect files (unchanged)
+
+# ---------------------------------------------------------------------------
+# File collection
+# ---------------------------------------------------------------------------
+
 def collect_files(directory):
     files = []
     for root, _, filenames in os.walk(directory):
         for filename in filenames:
+            if filename.startswith("."):  # Skip macOS resource forks and hidden files
+                continue
             file_path = os.path.join(root, filename)
             if is_audio_file(file_path):
                 files.append(file_path)
     return files
 
-# Main processing (UPDATED: Wrap in try-finally for shutdown, add initializer)
+
+# ---------------------------------------------------------------------------
+# Core processing
+# ---------------------------------------------------------------------------
+
+def process_file(file_path, config, rejects_log, progress_log, dest_dir):
+    if shutdown_event and shutdown_event.is_set():
+        return None
+
+    target_rate = config.get("target_sample_rate", 48000)
+
+    for attempt in range(3):
+        try:
+            # Reject zero-byte files immediately
+            if os.path.getsize(file_path) == 0:
+                logging.warning(f"Zero-byte file, rejecting: {file_path}")
+                append_log(
+                    rejects_log,
+                    {"path": file_path, "reason": "Zero-byte file", "timestamp": str(datetime.now())},
+                    is_list=True,
+                )
+                return None
+
+            rel_path = os.path.relpath(file_path, config["source_dir"])
+            base, ext = os.path.splitext(rel_path)
+            dest_path = os.path.join(dest_dir, f"{base}-48{ext}")
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+
+            # Skip if previously converted and source hasn't changed
+            with file_lock:
+                try:
+                    progress = (
+                        json.load(open(progress_log)) if os.path.exists(progress_log) else {}
+                    )
+                except json.JSONDecodeError:
+                    progress = {}
+            if rel_path in progress and progress[rel_path].get("status") == "converted":
+                if os.path.exists(dest_path) and file_hash(file_path) == progress[rel_path].get("source_hash"):
+                    logging.info(f"Already converted, skipping: {rel_path}")
+                    return None
+
+            # Skip if already at target sample rate
+            sample_rate = get_sample_rate(file_path)
+            if sample_rate is not None and sample_rate == target_rate:
+                logging.info(f"Already at {target_rate}Hz, skipping: {rel_path}")
+                append_log(
+                    progress_log,
+                    {rel_path: {"status": "skipped_rate", "reason": f"Already {target_rate}Hz", "timestamp": str(datetime.now())}},
+                    is_list=False,
+                )
+                return None
+
+            # Reject silent files
+            if is_entirely_silent(
+                file_path,
+                config["silence_thresh"],
+                config["min_silence_len"],
+                config["min_non_silent_len"],
+            ):
+                logging.info(f"Silent file, rejecting: {rel_path}")
+                append_log(
+                    rejects_log,
+                    {"path": file_path, "reason": "Entirely silent", "timestamp": str(datetime.now())},
+                    is_list=True,
+                )
+                return None
+
+            # Convert
+            if resample_audio(file_path, dest_path, target_rate, config["dry_run"]):
+                src_hash = file_hash(file_path)
+                append_log(
+                    progress_log,
+                    {rel_path: {"status": "converted", "source_hash": src_hash, "timestamp": str(datetime.now())}},
+                    is_list=False,
+                )
+                logging.info(f"Converted: {rel_path}")
+                return file_path
+            return None
+
+        except OSError as e:
+            if e.errno in (2, 57):  # ENOENT or socket not connected
+                logging.warning(f"Network error on {file_path} (attempt {attempt + 1}/3): {e}")
+                if config.get("enable_script_remount"):
+                    remount_network(config)
+                time.sleep(5)
+                continue
+            raise
+        except KeyboardInterrupt:
+            return None
+
+    logging.error(f"Failed after 3 attempts: {file_path}")
+    return None
+
+
 def batch_process(files, config, rejects_log, progress_log, dest_dir):
     converted = []
-    executor = None  # Declare outside for finally block
+    executor = None
     try:
-        executor = ProcessPoolExecutor(max_workers=config["max_workers"], initializer=ignore_sigint)
-        futures = {executor.submit(process_file, f, config, rejects_log, progress_log, dest_dir): f for f in files}
-        for future in tqdm(as_completed(futures), total=len(futures), desc="Processing files"):
+        executor = ProcessPoolExecutor(
+            max_workers=config["max_workers"], initializer=ignore_sigint
+        )
+        futures = {
+            executor.submit(process_file, f, config, rejects_log, progress_log, dest_dir): f
+            for f in files
+        }
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Processing"):
             if shutdown_event.is_set():
-                logging.info("Shutdown signaled; canceling remaining futures")
+                logging.info("Shutdown signaled — stopping queue")
                 break
             try:
-                result = future.result(timeout=300)  # 5min timeout per file
+                result = future.result(timeout=300)
                 if result:
                     converted.append(result)
             except TimeoutError:
-                logging.error(f"Timeout on file {futures[future]} - canceling")
+                logging.error(f"Timeout: {futures[future]}")
                 future.cancel()
             except Exception as e:
-                logging.error(f"Error on file {futures[future]}: {e}")
-        return len(converted), len(files) - len(converted)
+                logging.error(f"Error on {futures[future]}: {e}")
     finally:
         if executor:
-            executor.shutdown(wait=False, cancel_futures=True)  # Force shutdown
-            logging.info("Executor shut down")
+            executor.shutdown(wait=False, cancel_futures=True)
+    return len(converted), len(files) - len(converted)
 
-# Stability check for watch mode (unchanged)
+
+# ---------------------------------------------------------------------------
+# Post-run verification
+# ---------------------------------------------------------------------------
+
+def run_verification(config, dest_dir, progress_log, rejects_log):
+    """
+    Quick post-run check: confirms all source files are accounted for in
+    progress.json or rejects.json. Logs warnings if anything is missing.
+    Run verify_audio.py for a full report with hash checking.
+    """
+    logging.info("--- Post-run verification ---")
+    source_files = set(collect_files(config["source_dir"]))
+    try:
+        progress = json.load(open(progress_log)) if os.path.exists(progress_log) else {}
+    except json.JSONDecodeError:
+        progress = {}
+    try:
+        rejects = (
+            [e["path"] for e in json.load(open(rejects_log))]
+            if os.path.exists(rejects_log)
+            else []
+        )
+    except json.JSONDecodeError:
+        rejects = []
+
+    converted_sources = {os.path.join(config["source_dir"], rel) for rel in progress}
+    rejected_sources = set(rejects)
+    unprocessed = source_files - (converted_sources | rejected_sources)
+
+    missing_dest = []
+    for rel, data in progress.items():
+        if data.get("status") != "converted":
+            continue
+        base, ext = os.path.splitext(rel)
+        dest_path = os.path.join(dest_dir, f"{base}-48{ext}")
+        if not os.path.exists(dest_path):
+            missing_dest.append(rel)
+
+    logging.info(
+        f"Verification: {len(converted_sources)} converted, {len(rejected_sources)} rejected, "
+        f"{len(unprocessed)} unprocessed, {len(missing_dest)} missing dest files"
+    )
+    for f in sorted(unprocessed):
+        logging.warning(f"  Unprocessed: {f}")
+    for f in sorted(missing_dest):
+        logging.error(f"  Missing dest: {f}")
+
+    return len(unprocessed), len(missing_dest)
+
+
+# ---------------------------------------------------------------------------
+# Watch mode
+# ---------------------------------------------------------------------------
+
 def is_file_stable(file_path, wait_sec):
     last_size = os.path.getsize(file_path)
     start_time = time.time()
-    while time.time() - start_time < wait_sec * 2:  # Timeout after 2x wait
-        time.sleep(10)  # Poll every 10s
+    while time.time() - start_time < wait_sec * 2:
+        time.sleep(10)
         current_size = os.path.getsize(file_path)
-        if current_size == last_size:
-            if time.time() - start_time >= wait_sec:
-                return True
-        else:
+        if current_size == last_size and time.time() - start_time >= wait_sec:
+            return True
+        elif current_size != last_size:
             last_size = current_size
             start_time = time.time()
     return False
 
-# Watch handler (UPDATED: Check shutdown_event)
+
 class WatchHandler(FileSystemEventHandler):
     def __init__(self, config, rejects_log, progress_log, dest_dir):
         self.config = config
@@ -258,53 +431,59 @@ class WatchHandler(FileSystemEventHandler):
         self.dest_dir = dest_dir
 
     def on_created(self, event):
-        if shutdown_event.is_set():
+        if shutdown_event and shutdown_event.is_set():
             return
         if not event.is_directory and is_audio_file(event.src_path):
-            logging.info(f"New file: {event.src_path}")
+            logging.info(f"New file detected: {event.src_path}")
             if is_file_stable(event.src_path, self.config["stability_wait_sec"]):
-                process_file(event.src_path, self.config, self.rejects_log, self.progress_log, self.dest_dir)
-                print(f"Processed new file: {event.src_path} - Done!")  # Terminal notification
+                process_file(
+                    event.src_path, self.config, self.rejects_log,
+                    self.progress_log, self.dest_dir
+                )
 
     def on_modified(self, event):
-        self.on_created(event)  # Same logic for mods
+        self.on_created(event)
 
-# Interrupt handlers - UPDATED: Dynamic psutil termination, including ffmpeg
+
+# ---------------------------------------------------------------------------
+# Signal handling
+# ---------------------------------------------------------------------------
+
 def terminate_processes():
-    logging.info("Terminating all child processes...")
     current = psutil.Process(os.getpid())
     for child in current.children(recursive=True):
         try:
-            cmdline = ' '.join(child.cmdline())
-            if 'ffmpeg' in cmdline or 'python' in cmdline.lower() or 'process_audio.py' in cmdline:
-                child.terminate()  # Try TERM first
-                child.wait(timeout=5)  # Wait briefly
-                if child.is_running():
-                    child.kill()  # Force if needed
-                logging.info(f"Terminated process: {child.pid} ({cmdline[:50]}...)")
+            child.terminate()
+            child.wait(timeout=5)
+            if child.is_running():
+                child.kill()
         except psutil.NoSuchProcess:
-            pass  # Already gone
+            pass
         except Exception as e:
             logging.error(f"Error terminating {child.pid}: {e}")
 
+
 def signal_handler(sig, frame):
-    logging.info("Interrupt received (SIGINT). Signaling shutdown...")
+    logging.info("Interrupt received — shutting down gracefully...")
     if shutdown_event:
         shutdown_event.set()
     terminate_processes()
     sys.exit(0)
 
-# Main - UPDATED: Set daemon, try-except for batch, signal handler
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", required=True, help="Path to YAML config")
+    parser = argparse.ArgumentParser(description="Ghost Processing — audio conversion pipeline")
+    parser.add_argument("--config", required=True, help="Path to YAML config file")
     args = parser.parse_args()
 
     config = load_config(args.config)
-    setup_logging(config["log_dir"], config["verbose"])
+    setup_logging(config["log_dir"], config.get("verbose", False))
     signal.signal(signal.SIGINT, signal_handler)
 
-    # Derive dest dir (unchanged)
     source_name = os.path.basename(os.path.normpath(config["source_dir"]))
     dest_dir = os.path.join(config["dest_base"], f"{source_name}-48")
     os.makedirs(dest_dir, exist_ok=True)
@@ -315,10 +494,10 @@ def main():
     start_time = time.time()
 
     if config["watch_mode"]:
-        logging.info("Starting watch mode...")
-        event_handler = WatchHandler(config, rejects_log, progress_log, dest_dir)
+        logging.info(f"Watch mode — monitoring: {config['source_dir']}")
+        handler = WatchHandler(config, rejects_log, progress_log, dest_dir)
         observer = Observer()
-        observer.schedule(event_handler, config["source_dir"], recursive=True)
+        observer.schedule(handler, config["source_dir"], recursive=True)
         observer.start()
         try:
             while not shutdown_event.is_set():
@@ -329,27 +508,34 @@ def main():
             observer.stop()
             observer.join()
     else:
-        logging.info("Starting batch mode...")
+        logging.info(f"Batch mode — source: {config['source_dir']}")
         files = collect_files(config["source_dir"])
+        logging.info(f"Found {len(files)} audio files")
         try:
-            converted_count, rejected_count = batch_process(files, config, rejects_log, progress_log, dest_dir)
-            time_taken = time.time() - start_time
-            stats = f"Processing complete: {converted_count} files converted, {rejected_count} rejected. Time taken: {time_taken:.2f}s. Check logs for details."
-            logging.info(stats)
-            print(stats)  # Terminal notification
+            converted, skipped = batch_process(files, config, rejects_log, progress_log, dest_dir)
+            elapsed = time.time() - start_time
+            summary = f"Done: {converted} converted, {skipped} skipped/rejected in {elapsed:.1f}s"
+            logging.info(summary)
+            print(f"\n{summary}")
         except KeyboardInterrupt:
-            logging.info("Batch interrupted; cleaning up...")
             shutdown_event.set()
-            terminate_processes()
+
+        # Auto-verification after batch
+        unprocessed, missing = run_verification(config, dest_dir, progress_log, rejects_log)
+        if unprocessed > 0 or missing > 0:
+            print(f"WARNING: {unprocessed} unprocessed, {missing} missing dest files.")
+            print("Run verify_audio.py for a full report.")
+        else:
+            print("Verification passed — all files accounted for.")
+
 
 if __name__ == "__main__":
-    import multiprocessing as mp  # Alias to avoid full name
-    current_method = mp.get_start_method(allow_none=True)
-    if current_method is None or current_method != 'fork':
+    import multiprocessing as mp
+    if mp.get_start_method(allow_none=True) != "fork":
         try:
-            mp.set_start_method('fork')  # Fix macOS hangs with spawn
-        except RuntimeError as e:
-            logging.warning(f"Could not set start method: {e}")
-    file_lock = mp.Lock()  # Create after set_start_method
+            mp.set_start_method("fork")
+        except RuntimeError:
+            pass
+    file_lock = mp.Lock()
     shutdown_event = mp.Event()
     main()

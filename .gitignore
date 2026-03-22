@@ -1,10 +1,18 @@
 .aider*
+.grok/
+.DS_Store
 
-# Ignore log files and folders
+# Logs
 logs/
 *.log
+
+# Config files contain personal paths — keep out of repo
+config.local.yaml
+config.docker.yaml
 config.yaml
-.gitignore
-.DS_Store
-*Feature Requests
-.grok/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+ghost-processing-venv/

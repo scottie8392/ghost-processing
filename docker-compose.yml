@@ -1,0 +1,14 @@
+services:
+  ghost-processing:
+    build: .
+    platform: linux/amd64  # Synology is Intel x86_64
+    volumes:
+      # Source audio (read-only) — update path to match your NAS layout
+      - /volume1/Stems/_Ghost\ Tracks/PT\ Exports/Boston:/data/source:ro
+      # Destination for converted files
+      - /volume1/Stems/_Ghost\ Tracks:/data/dest
+      # Logs on the host
+      - ./logs:/app/logs
+      # Config file
+      - ./config.docker.yaml:/config/config.docker.yaml:ro
+    restart: "no"
