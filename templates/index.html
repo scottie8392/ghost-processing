@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ghost Processing</title>
+  <style>
+    :root {
+      --bg:         #111;
+      --surface:    #1c1c1c;
+      --surface2:   #252525;
+      --border:     #333;
+      --accent:     #f0a030;
+      --text:       #ddd;
+      --text-dim:   #777;
+      --success:    #5a9e5a;
+      --error:      #c85a5a;
+      --warn:       #c89030;
+      --radius:     6px;
+      --mono:       "SF Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      padding: 28px 20px;
+    }
+
+    .container { max-width: 780px; margin: 0 auto; }
+
+    /* Header */
+    header {
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    header h1 { font-size: 18px; font-weight: 700; color: var(--accent); letter-spacing: -0.2px; }
+    header span { font-size: 12px; color: var(--text-dim); }
+
+    /* Cards */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 14px;
+    }
+
+    /* Form fields */
+    .field { margin-bottom: 14px; }
+    .field:last-child { margin-bottom: 0; }
+
+    label.field-label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 5px;
+    }
+
+    input[type="text"],
+    input[type="number"] {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 8px 10px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus { border-color: var(--accent); }
+
+    .hint { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+
+    /* Row layout */
+    .row { display: flex; gap: 14px; }
+    .row .field { flex: 1; }
+
+    /* Checkboxes */
+    .checks { display: flex; gap: 20px; align-items: center; padding-top: 2px; }
+    .check-label {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 13px;
+      color: var(--text);
+      cursor: pointer;
+    }
+    input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+
+    /* Advanced accordion */
+    details { margin-top: 14px; }
+    details summary {
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      user-select: none;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    details summary::before { content: "▶"; font-size: 9px; transition: transform 0.15s; }
+    details[open] summary::before { transform: rotate(90deg); }
+    details summary:hover { color: var(--text); }
+    details .detail-body { margin-top: 14px; }
+
+    /* Buttons */
+    .btn-row { display: flex; gap: 10px; margin-top: 18px; }
+    button {
+      padding: 10px 22px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    button:active { transform: scale(0.97); }
+    button:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+
+    .btn-run { background: var(--accent); color: #111; }
+    .btn-run:hover:not(:disabled) { opacity: 0.82; }
+
+    .btn-stop {
+      background: transparent;
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+    }
+    .btn-stop:hover:not(:disabled) { border-color: var(--error); color: var(--error); }
+
+    /* Output */
+    .output-bar {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 10px;
+    }
+
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+    .dot.running { background: var(--accent); animation: pulse 1.1s ease-in-out infinite; }
+    .dot.done    { background: var(--success); }
+    .dot.error   { background: var(--error); }
+
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+    .status-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
+
+    .log {
+      background: #0a0a0a;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.65;
+      height: 420px;
+      overflow-y: auto;
+    }
+
+    .log-empty {
+      color: var(--text-dim);
+      text-align: center;
+      padding-top: 180px;
+      font-style: italic;
+    }
+
+    .ll       { padding: 1px 0; word-break: break-all; }
+    .ll.error   { color: var(--error); }
+    .ll.warn    { color: var(--warn); }
+    .ll.success { color: var(--success); }
+    .ll.dim     { color: #555; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>Ghost Processing</h1>
+    <span>96kHz → 48kHz stem converter</span>
+  </header>
+
+  <!-- Config card -->
+  <div class="card">
+
+    <div class="field">
+      <label class="field-label">Source Directory</label>
+      <input type="text" id="source_dir"
+             list="source_history"
+             placeholder="/path/to/session/PT Exports/Boston"
+             value="{{ profile.source_dir or '' }}">
+      <datalist id="source_history">
+        {% for path in profile.saved_sources %}
+        <option value="{{ path }}">
+        {% endfor %}
+      </datalist>
+      <div class="hint">Full path to the folder of stems you want to convert. Your last 10 are saved.</div>
+    </div>
+
+    <div class="field">
+      <label class="field-label">Destination Base</label>
+      <input type="text" id="dest_base"
+             placeholder="/path/to/output/base"
+             value="{{ profile.dest_base or '' }}">
+      <div class="hint">A subfolder named after your session (with a <code>-48</code> suffix) will be created here.</div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label class="field-label">Workers</label>
+        <input type="number" id="max_workers" min="1" max="16"
+               value="{{ profile.max_workers or 6 }}">
+      </div>
+      <div class="field" style="display:flex; align-items:flex-end; padding-bottom:1px;">
+        <div class="checks">
+          <label class="check-label">
+            <input type="checkbox" id="dry_run" {% if profile.dry_run %}checked{% endif %}>
+            Dry Run
+          </label>
+          <label class="check-label">
+            <input type="checkbox" id="verbose" {% if profile.verbose %}checked{% endif %}>
+            Verbose Logs
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <details>
+      <summary>Advanced</summary>
+      <div class="detail-body">
+        <div class="row">
+          <div class="field">
+            <label class="field-label">Target Sample Rate (Hz)</label>
+            <input type="number" id="target_sample_rate"
+                   value="{{ profile.target_sample_rate or 48000 }}">
+          </div>
+          <div class="field">
+            <label class="field-label">Silence Threshold (dB)</label>
+            <input type="number" id="silence_thresh" step="0.5"
+                   value="{{ profile.silence_thresh or -50.0 }}">
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label class="field-label">Min Silence Length (ms)</label>
+            <input type="number" id="min_silence_len"
+                   value="{{ profile.min_silence_len or 200 }}">
+          </div>
+          <div class="field">
+            <label class="field-label">Min Non-Silent Length (ms)</label>
+            <input type="number" id="min_non_silent_len"
+                   value="{{ profile.min_non_silent_len or 10 }}">
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <div class="btn-row">
+      <button class="btn-run" id="btn-run" onclick="startRun()">Run Processing</button>
+      <button class="btn-stop" id="btn-stop" onclick="stopRun()" disabled>Stop</button>
+    </div>
+
+  </div>
+
+  <!-- Output card -->
+  <div class="card">
+    <div class="output-bar">
+      <div class="dot" id="dot"></div>
+      <span class="status-label" id="status-label">Ready</span>
+    </div>
+    <div class="log" id="log">
+      <div class="log-empty">Output will appear here when processing starts.</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  let es = null;
+  let autoScroll = true;
+
+  const logEl     = document.getElementById('log');
+  const dot       = document.getElementById('dot');
+  const statusLbl = document.getElementById('status-label');
+  const btnRun    = document.getElementById('btn-run');
+  const btnStop   = document.getElementById('btn-stop');
+
+  logEl.addEventListener('scroll', () => {
+    autoScroll = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 30;
+  });
+
+  function setStatus(state, text) {
+    dot.className = 'dot' + (state ? ' ' + state : '');
+    statusLbl.textContent = text;
+  }
+
+  function addLine(text, cls) {
+    const empty = logEl.querySelector('.log-empty');
+    if (empty) empty.remove();
+    const d = document.createElement('div');
+    d.className = 'll' + (cls ? ' ' + cls : '');
+    d.textContent = text;
+    logEl.appendChild(d);
+    if (autoScroll) logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function classify(msg) {
+    const m = msg.toLowerCase();
+    if (m.includes('error') || m.includes('failed'))            return 'error';
+    if (m.includes('warning') || m.includes('warn'))            return 'warn';
+    if (m.includes('converted:') || m.includes('passed'))       return 'success';
+    if (m.includes('skip') || m.includes('already at'))         return 'dim';
+    return '';
+  }
+
+  function getConfig() {
+    return {
+      source_dir:          document.getElementById('source_dir').value.trim(),
+      dest_base:           document.getElementById('dest_base').value.trim(),
+      max_workers:         parseInt(document.getElementById('max_workers').value) || 6,
+      dry_run:             document.getElementById('dry_run').checked,
+      verbose:             document.getElementById('verbose').checked,
+      target_sample_rate:  parseInt(document.getElementById('target_sample_rate').value) || 48000,
+      silence_thresh:      parseFloat(document.getElementById('silence_thresh').value) || -50.0,
+      min_silence_len:     parseInt(document.getElementById('min_silence_len').value) || 200,
+      min_non_silent_len:  parseInt(document.getElementById('min_non_silent_len').value) || 10,
+    };
+  }
+
+  async function startRun() {
+    const cfg = getConfig();
+    if (!cfg.source_dir) { alert('Please enter a source directory.'); return; }
+    if (!cfg.dest_base)  { alert('Please enter a destination base directory.'); return; }
+
+    logEl.innerHTML = '';
+    autoScroll = true;
+    setStatus('running', 'Running…');
+    btnRun.disabled = true;
+    btnStop.disabled = false;
+
+    try {
+      const res = await fetch('/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        addLine('Error: ' + (err.error || 'Unknown'), 'error');
+        setStatus('error', 'Error');
+        btnRun.disabled = false; btnStop.disabled = true;
+        return;
+      }
+    } catch (e) {
+      addLine('Could not reach server: ' + e.message, 'error');
+      setStatus('error', 'Error');
+      btnRun.disabled = false; btnStop.disabled = true;
+      return;
+    }
+
+    if (es) es.close();
+    es = new EventSource('/stream');
+
+    es.onmessage = (e) => {
+      const data = JSON.parse(e.data);
+      if (data.type === 'log') {
+        addLine(data.message, classify(data.message));
+      } else if (data.type === 'done') {
+        const ok = data.returncode === 0;
+        setStatus(ok ? 'done' : 'error', ok ? 'Done' : 'Finished with errors');
+        btnRun.disabled = false; btnStop.disabled = true;
+        es.close(); es = null;
+      } else if (data.type === 'error') {
+        addLine('Error: ' + data.message, 'error');
+      }
+    };
+
+    es.onerror = () => {
+      setStatus('error', 'Connection lost');
+      btnRun.disabled = false; btnStop.disabled = true;
+      if (es) { es.close(); es = null; }
+    };
+  }
+
+  async function stopRun() {
+    await fetch('/stop', { method: 'POST' });
+    addLine('— Stopped by user —', 'warn');
+    setStatus('', 'Stopped');
+    btnRun.disabled = false; btnStop.disabled = true;
+    if (es) { es.close(); es = null; }
+  }
+</script>
+</body>
+</html>

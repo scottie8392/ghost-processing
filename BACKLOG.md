@@ -10,17 +10,24 @@
 
 **Quick start — Mac:**
 ```bash
-cd ~/Documents/projects/ghost-processing
-source ghost-processing-venv/bin/activate
-# Edit config.local.yaml to set source_dir for the session
-python process_audio.py --config config.local.yaml
-python verify_audio.py --config config.local.yaml
+# First time only:
+bash setup.sh
+
+# Every time:
+double-click start.command   # Opens browser at http://localhost:5001
 ```
 
-**Quick start — Docker (on Synology):**
+**Quick start — Synology (Docker):**
 ```bash
-# Edit docker-compose.yml volume paths for the session
-docker-compose up
+docker-compose up -d
+# Then open http://NAS_IP:5001 from any browser on your network
+```
+
+**Command-line (advanced):**
+```bash
+source ghost-processing-venv/bin/activate
+python process_audio.py --config config.local.yaml
+python verify_audio.py --config config.local.yaml
 ```
 
 **System requirements:**
@@ -62,6 +69,10 @@ docker-compose up
 - [x] Clean up requirements.txt — remove unused packages
 - [x] Remove normalization (was removed in earlier commit)
 - [x] Add shaped dithering via SoX for higher-quality resampling
+- [x] Add browser-based web UI (`app.py` + `templates/index.html`) — no terminal needed
+- [x] Add `start.command` double-click Mac launcher — auto-creates venv, opens browser
+- [x] Add `setup.sh` first-time setup script — installs deps, checks for sox/ffmpeg
+- [x] Settings auto-save per run; source dir history (last 10) shown as dropdown
 
 ---
 

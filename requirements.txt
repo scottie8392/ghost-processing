@@ -4,6 +4,7 @@
 #   apt-get install sox ffmpeg (Docker — handled in Dockerfile)
 
 audioop-lts==0.2.1    # Python 3.13 compatibility shim for pydub (audioop removed from stdlib)
+flask==3.1.0          # Web UI server
 psutil==5.9.8         # Child process management for graceful shutdown
 pydub==0.25.1         # Audio decoding and silence detection
 PyYAML==6.0.1         # Config file parsing
