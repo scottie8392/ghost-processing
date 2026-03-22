@@ -3,3 +3,8 @@
 # Ignore log files and folders
 logs/
 *.log
+config.yaml
+.gitignore
+.DS_Store
+*Feature Requests
+.grok/
