@@ -364,6 +364,19 @@
     .completion-stats .cs-rejected  { color: var(--error);   font-weight: 600; }
     .completion-stats .cs-skipped   { color: #666;           font-weight: 600; }
     .completion-stats .cs-sep       { color: #333; }
+    .btn-new-run {
+      margin-top: 6px;
+      padding: 6px 18px;
+      font-size: 12px;
+      font-weight: 600;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-dim);
+      cursor: pointer;
+      letter-spacing: 0.3px;
+    }
+    .btn-new-run:hover { color: var(--text); border-color: #555; }
 
     /* ── Last-run chip ──────────────────────────────────────────── */
     .last-run-chip {
@@ -822,6 +835,7 @@
       <div class="completion-icon" id="completion-icon"></div>
       <div class="completion-title" id="completion-title"></div>
       <div class="completion-stats" id="completion-stats"></div>
+      <button class="btn-new-run" onclick="resetUI()">New Run</button>
     </div>
 
     <div class="log" id="log">
@@ -1009,6 +1023,22 @@
     };
   }
 
+  function resetUI() {
+    logEl.innerHTML = '<div class="log-empty">Output will appear here when processing starts.</div>';
+    rejectedList.innerHTML = '<li class="review-empty">None this run</li>';
+    skippedList.innerHTML  = '<li class="review-empty">None this run</li>';
+    rejectedCount = 0; skippedCount = 0; convertedCount = 0;
+    badgeRejected.textContent = '0 rejected';
+    badgeSkipped.textContent  = '0 skipped';
+    reviewCard.classList.add('hidden');
+    completionBanner.classList.add('hidden');
+    lastRunChip.classList.remove('hidden');
+    autoScroll = true;
+    setStatus('', '');
+    btnRun.disabled = false;
+    btnStop.disabled = true;
+  }
+
   logEl.addEventListener('scroll', () => {
     autoScroll = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 30;
   });
@@ -1098,16 +1128,8 @@
     const cfg = getConfig();
     if (!cfg.source_dir) { alert('Please enter a source directory.'); return; }
 
-    logEl.innerHTML = '';
-    rejectedList.innerHTML = '<li class="review-empty">None this run</li>';
-    skippedList.innerHTML  = '<li class="review-empty">None this run</li>';
-    rejectedCount = 0; skippedCount = 0; convertedCount = 0;
-    badgeRejected.textContent = '0 rejected';
-    badgeSkipped.textContent  = '0 skipped';
-    reviewCard.classList.add('hidden');
-    completionBanner.classList.add('hidden');
+    resetUI();
     lastRunChip.classList.add('hidden');
-    autoScroll = true;
     setStatus('running', 'Running…');
     btnRun.disabled = true;
     btnStop.disabled = false;

@@ -142,7 +142,7 @@ def file_hash(file_path):
 
 
 def is_audio_file(file_path):
-    return file_path.lower().endswith((".wav", ".aiff"))
+    return file_path.lower().endswith((".wav", ".aif", ".aiff"))
 
 
 def get_sample_rate(file_path):
@@ -269,6 +269,7 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
             rate_suffix = f"{target_rate // 1000}k"
             dest_path = os.path.join(dest_dir, f"{base}-{rate_suffix}{ext}")
             os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            logging.info(f"Analyzing: {rel_path}")
 
             # Skip if previously converted and source hasn't changed
             with file_lock:

@@ -25,7 +25,7 @@ def file_hash(file_path):
 
 
 def is_audio_file(file_path):
-    return file_path.lower().endswith((".wav", ".aiff"))
+    return file_path.lower().endswith((".wav", ".aif", ".aiff"))
 
 
 def collect_files(directory):
