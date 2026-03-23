@@ -33,7 +33,7 @@ docker-compose up -d
 ## 🔴 Must Fix (Known Bugs)
 
 - [ ] **Hardcoded `-48` in destination directory name and verifier** — the filename generation in `process_file()` is already correct (uses `rate_suffix` derived from `target_sample_rate`). But two places still hardcode `-48`: (1) `main()` line 500 creates the dest dir as `{source_name}-48` regardless of target rate; (2) `run_verification()` line 404 checks for `{base}-48{ext}` in the dest, so it can't find correctly-named files and reports them all as missing. Fix both to use the same `rate_suffix` logic.
-- [ ] **executor.shutdown(wait=False)** — in `batch_process()`, the ProcessPoolExecutor is shut down with `wait=False`, which can leave worker processes running after the job ends. Change to `wait=True`.
+- [x] **executor.shutdown(wait=False)** — already fixed; `batch_process()` uses `wait=True, cancel_futures=True`.
 - [ ] **verify_audio.py rejects.json crash** — `[e["path"] for e in json.load(f)]` will raise `KeyError` or `TypeError` if any list entry isn't a dict with a "path" key. Add type guard.
 - [ ] **`/browse` endpoint path traversal** — no validation prevents a crafted request from browsing outside intended directories. Add a root-jail check for non-local deployments.
 - [ ] **Stop button doesn't kill SoX workers** — the `/stop` endpoint only terminates `_active_process` (the Python wrapper spawned by `app.py`). Because it was launched with `start_new_session=True`, the SoX subprocesses inside the `ProcessPoolExecutor` are in a separate process group and don't receive the signal. Clicking Stop goes quiet in the log but SoX keeps running in the background. Fix: send SIGTERM to the entire process group (`os.killpg`).

@@ -385,7 +385,7 @@ def run_verification(config, dest_dir, progress_log, rejects_log):
         progress = {}
     try:
         rejects = (
-            [e["path"] for e in json.load(open(rejects_log))]
+            [e["path"] for e in json.load(open(rejects_log)) if isinstance(e, dict) and "path" in e]
             if os.path.exists(rejects_log)
             else []
         )
@@ -396,12 +396,14 @@ def run_verification(config, dest_dir, progress_log, rejects_log):
     rejected_sources = set(rejects)
     unprocessed = source_files - (converted_sources | rejected_sources)
 
+    target_rate = config.get("target_sample_rate", 48000)
+    rate_suffix = f"{target_rate // 1000}k"
     missing_dest = []
     for rel, data in progress.items():
         if data.get("status") != "converted":
             continue
         base, ext = os.path.splitext(rel)
-        dest_path = os.path.join(dest_dir, f"{base}-48{ext}")
+        dest_path = os.path.join(dest_dir, f"{base}-{rate_suffix}{ext}")
         if not os.path.exists(dest_path):
             missing_dest.append(rel)
 
@@ -497,7 +499,9 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
 
     source_name = os.path.basename(os.path.normpath(config["source_dir"]))
-    dest_dir = os.path.join(config["dest_base"], f"{source_name}-48")
+    target_rate = config.get("target_sample_rate", 48000)
+    rate_suffix = f"{target_rate // 1000}k"
+    dest_dir = os.path.join(config["dest_base"], f"{source_name}-{rate_suffix}")
     os.makedirs(dest_dir, exist_ok=True)
 
     rejects_log = os.path.join(dest_dir, "rejects.json")

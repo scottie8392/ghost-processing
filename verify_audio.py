@@ -55,7 +55,9 @@ def main():
     source_dir = config["source_dir"]
     dest_base = config["dest_base"]
     source_name = os.path.basename(os.path.normpath(source_dir))
-    dest_dir = os.path.join(dest_base, f"{source_name}-48")
+    target_rate = config.get("target_sample_rate", 48000)
+    rate_suffix = f"{target_rate // 1000}k"
+    dest_dir = os.path.join(dest_base, f"{source_name}-{rate_suffix}")
     progress_log = os.path.join(dest_dir, "progress.json")
     rejects_log = os.path.join(dest_dir, "rejects.json")
 
@@ -74,7 +76,7 @@ def main():
     if os.path.exists(rejects_log):
         with open(rejects_log) as f:
             try:
-                rejects = [e["path"] for e in json.load(f)]
+                rejects = [e["path"] for e in json.load(f) if isinstance(e, dict) and "path" in e]
             except json.JSONDecodeError:
                 print("WARNING: rejects.json is corrupted")
 
@@ -94,7 +96,7 @@ def main():
             continue
         rel = os.path.relpath(source_path, source_dir)
         base, ext = os.path.splitext(rel)
-        dest_path = os.path.join(dest_dir, f"{base}-48{ext}")
+        dest_path = os.path.join(dest_dir, f"{base}-{rate_suffix}{ext}")
         if not os.path.exists(dest_path):
             missing_dest.append(source_path)
         else:

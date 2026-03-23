@@ -15,6 +15,7 @@ import logging
 import os
 import queue
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -651,11 +652,22 @@ def docker_mappings():
         return jsonify({"mappings": [], "error": str(e)})
 
 
+_BROWSE_BLOCKED = {
+    "/etc", "/private/etc", "/System", "/usr", "/bin", "/sbin",
+    "/Library/Keychains", "/private/var", "/root",
+}
+
+
 @app.route("/browse")
 def browse():
     path = request.args.get("path", "~")
     path = os.path.expanduser(path)
     path = os.path.normpath(path)
+    # Block sensitive system directories — prevents network-accessible Docker
+    # instances from being used to traverse the host filesystem.
+    for blocked in _BROWSE_BLOCKED:
+        if path == blocked or path.startswith(blocked + "/"):
+            return jsonify({"error": "Access denied"}), 403
     try:
         entries = []
         with os.scandir(path) as it:
@@ -679,7 +691,14 @@ def browse():
 def stop():
     global _active_process
     if _active_process and _active_process.poll() is None:
-        _active_process.terminate()
+        try:
+            # Kill the entire process group — the subprocess was started with
+            # start_new_session=True, so it and all its SoX workers share a
+            # process group that is separate from the server. Terminating just
+            # _active_process would leave the SoX children running.
+            os.killpg(os.getpgid(_active_process.pid), signal.SIGTERM)
+        except ProcessLookupError:
+            pass  # Process already exited between poll() and killpg()
         return jsonify({"status": "stopped"})
     return jsonify({"status": "not running"})
 
