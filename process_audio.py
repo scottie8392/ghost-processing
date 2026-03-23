@@ -76,6 +76,7 @@ def load_config(config_path):
     # Defaults for optional keys
     config.setdefault("max_workers", max(1, multiprocessing.cpu_count() // 2))
     config.setdefault("target_sample_rate", 48000)
+    config.setdefault("bit_depth", 24)
     config.setdefault("silence_thresh", -50.0)
     config.setdefault("min_silence_len", 200)
     config.setdefault("min_non_silent_len", 10)
@@ -170,12 +171,21 @@ def is_entirely_silent(audio_file, silence_thresh, min_silence_len, min_non_sile
         return False
 
 
-def resample_audio(audio_file, dest_file, target_rate, dry_run):
+def resample_audio(audio_file, dest_file, target_rate, bit_depth, dry_run):
     if dry_run:
         logging.info(f"[DRY RUN] Would resample {audio_file} → {dest_file}")
         return True
     try:
-        cmd = ["sox", audio_file, dest_file, "rate", "-v", str(target_rate), "dither", "-s"]
+        is_float = str(bit_depth) == "32f"
+        depth_str = "32" if is_float else str(bit_depth)
+        fmt_opts = ["-b", depth_str]
+        if is_float:
+            fmt_opts += ["-e", "floating-point"]
+        # Dithering only applies to integer output; skip for float
+        effects = ["rate", "-v", str(target_rate)]
+        if not is_float:
+            effects += ["dither", "-s"]
+        cmd = ["sox", audio_file] + fmt_opts + [dest_file] + effects
         subprocess.run(cmd, check=True, capture_output=True)
         return True
     except subprocess.CalledProcessError as e:
@@ -256,7 +266,8 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
 
             rel_path = os.path.relpath(file_path, config["source_dir"])
             base, ext = os.path.splitext(rel_path)
-            dest_path = os.path.join(dest_dir, f"{base}-48{ext}")
+            rate_suffix = f"{target_rate // 1000}k"
+            dest_path = os.path.join(dest_dir, f"{base}-{rate_suffix}{ext}")
             os.makedirs(os.path.dirname(dest_path), exist_ok=True)
 
             # Skip if previously converted and source hasn't changed
@@ -299,7 +310,8 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                 return None
 
             # Convert
-            if resample_audio(file_path, dest_path, target_rate, config["dry_run"]):
+            bit_depth = config.get("bit_depth", 24)
+            if resample_audio(file_path, dest_path, target_rate, bit_depth, config["dry_run"]):
                 src_hash = file_hash(file_path)
                 append_log(
                     progress_log,
@@ -351,7 +363,7 @@ def batch_process(files, config, rejects_log, progress_log, dest_dir):
                 logging.error(f"Error on {futures[future]}: {e}")
     finally:
         if executor:
-            executor.shutdown(wait=False, cancel_futures=True)
+            executor.shutdown(wait=True, cancel_futures=True)
     return len(converted), len(files) - len(converted)
 
 

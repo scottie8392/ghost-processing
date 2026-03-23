@@ -1,8 +1,6 @@
 # Ghost Processing
 
-Batch audio conversion tool for music stems. Scrubs silent/empty files, converts 96kHz WAV/AIFF to 48kHz WAV using high-quality SoX resampling with shaped dithering, and names output files with a `-48` suffix.
-
-Runs as a local web app — open a browser, fill in two paths, click Run.
+Batch audio conversion tool for music stems. Detects and discards silent/empty files, then resamples WAV/AIFF to a target rate (48kHz default) and bit depth (24-bit default) using SoX with shaped dithering. Runs as a local web app — double-click to launch, connect to your NAS, click Run.
 
 ---
 
@@ -16,8 +14,9 @@ Runs as a local web app — open a browser, fill in two paths, click Run.
 6. [Using the Web UI](#using-the-web-ui)
 7. [Finding Your Paths](#finding-your-paths)
 8. [Understanding the Output](#understanding-the-output)
-9. [Troubleshooting](#troubleshooting)
-10. [Advanced: Command Line](#advanced-command-line)
+9. [Overnight & Unattended Runs](#overnight--unattended-runs)
+10. [Troubleshooting](#troubleshooting)
+11. [Advanced: Command Line](#advanced-command-line)
 
 ---
 
@@ -56,13 +55,10 @@ Progress is tracked in a `progress.json` file in the output folder, so interrupt
 | Requirement | Version | Notes |
 |-------------|---------|-------|
 | macOS | 12+ | Monterey or later |
-| Python | 3.11+ | Check with `python3 --version` in Terminal |
-| Homebrew | any | Package manager — install at [brew.sh](https://brew.sh) |
-| SoX | any | Audio conversion — `brew install sox` |
-| FFmpeg | any | Audio decoding — `brew install ffmpeg` |
-| AutoMounter | any | For NFS access to your NAS — [pixeleyes.nz](https://www.pixeleyes.co.nz/automounter/) |
-
-> **Note:** `setup.sh` will install SoX and FFmpeg for you automatically if Homebrew is already installed.
+| Python | 3.11+ | Only manual step — download from [python.org](https://www.python.org/downloads/) if needed |
+| Homebrew | any | Installed automatically by `start.command` if missing |
+| SoX | any | Installed automatically via Homebrew |
+| FFmpeg | any | Installed automatically via Homebrew |
 
 ### Synology NAS
 
@@ -85,56 +81,24 @@ If you're cloning from Git:
 ```bash
 cd ~/Documents/projects
 git clone <repo-url> ghost-processing
-cd ghost-processing
 ```
 
-### Step 2 — Install Python (if needed)
+### Step 2 — Launch
 
-Open Terminal and run:
-```bash
-python3 --version
-```
+**Right-click `start.command` → Open** (right-click is required the first time due to macOS security).
 
-If you see `Python 3.11` or higher, you're good. If not, download it from [python.org/downloads](https://www.python.org/downloads/).
-
-### Step 3 — Install Homebrew (if needed)
-
-Homebrew is a package manager for Mac that installs tools like SoX and FFmpeg. If you don't have it:
-
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-Follow the on-screen instructions. This takes a few minutes.
-
-### Step 4 — Run setup
-
-In Terminal, `cd` to the project folder and run:
-
-```bash
-bash setup.sh
-```
-
-This will:
-- Create an isolated Python environment (so nothing affects your system Python)
+A Terminal window opens. On the very first run it will automatically:
+- Install Homebrew if missing *(you may be asked for your password)*
+- Install SoX and FFmpeg via Homebrew
+- Create an isolated Python environment
 - Install all Python dependencies
-- Install SoX and FFmpeg via Homebrew if they're missing
+- Open your browser at `http://localhost:5001`
 
-You should see green checkmarks for everything. If something fails, see [Troubleshooting](#troubleshooting).
+Subsequent launches are instant — just double-click `start.command`.
 
-### Step 5 — Make the launcher executable (first time only)
+> **Python required:** The script will check for Python 3.11+ and open the download page if it's missing. Install it, then right-click → Open again.
 
-```bash
-chmod +x start.command
-```
-
-### Step 6 — Launch
-
-Double-click **`start.command`** in Finder.
-
-A Terminal window will open briefly, then your browser will open automatically at `http://localhost:5001`. You're ready to use the app.
-
-> **Tip:** You can also drag `start.command` to your Dock for quick access.
+> **Tip:** Drag `start.command` to your Dock for one-click access.
 
 ---
 
@@ -200,85 +164,97 @@ Replace `10.11.24.24` with your NAS IP address.
 
 Double-click `start.command`. Your browser opens to the app automatically.
 
-### Fill in the fields
+### Choose your mode
 
-**Source Directory** — the full path to the session folder you want to process.
+Use the mode selector at the top to tell the app where your files live:
 
-This is the folder that contains your stems (WAV/AIFF files). It can have subfolders — the tool processes everything recursively.
+- **NAS** — files are on a network-attached storage device (Synology, unRAID, etc.). The app connects via NFS or SMB and mounts the share automatically.
+- **Local** — files are on your Mac's internal drive or a directly connected external drive.
+- **Docker** — you're accessing the app from inside a Docker container running on the NAS. Paths are container-internal (e.g. `/data/...`).
 
-```
-Mac example:
-/Users/scottie/Library/Containers/nz.co.pixeleyes.AutoMounter/Data/Mounts/Local-JUPITER/NFS/Stems/_Ghost Tracks/PT Exports/Boston
+### NAS mode — connecting to your NAS
 
-Synology Docker example:
-/data/stems/_Ghost Tracks/PT Exports/Boston
-```
+1. Enter your NAS IP address and select a protocol (NFS or SMB).
+2. Click **Test Connection**. Available shares appear as clickable chips.
+3. Click a share chip to mount it and pre-fill the source path.
+4. Use the **folder icon** next to the source field to browse and select the exact session folder.
 
-**Destination Base** — the folder where output will be created.
+Your NAS IP and previously used paths are remembered for next time.
 
-The tool creates a new subfolder here, named after your session with `-48` appended. You don't need to create anything manually.
+**SMB only:** A username/password field appears. Tick **Remember me** to persist credentials across sessions (stored in `profile.json` on your Mac — never leaves your machine).
 
-```
-Mac example:
-/Users/scottie/Library/Containers/nz.co.pixeleyes.AutoMounter/Data/Mounts/Local-JUPITER/NFS/Stems/_Ghost Tracks
+### Local mode
 
-Synology Docker example:
-/data/stems/_Ghost Tracks
-```
+Use the **folder icon** to browse your Mac's filesystem and select the session folder directly. No mounting needed.
 
-**Workers** — how many files to process at the same time.
+### Docker mode
 
-- Mac (via NFS): `6` is a good balance
-- Synology Docker: `4` is safer (Synology CPUs are slower)
-- If the NAS feels sluggish during a run, lower this
+Enter container-internal paths (e.g. `/data/stems/_Ghost Tracks/PT Exports/Boston`). The app reads your `docker-compose.yml` and shows the corresponding host path below each field so you can confirm the mapping is correct.
 
-**Dry Run** — tick this to do a test run without actually converting anything. Good for checking that paths are correct and seeing how many files would be processed.
+### Configure the conversion
 
-**Verbose Logs** — tick this to see more detail in the output panel, including every file that gets skipped.
+**Sample Rate** — target output rate. Default is 48kHz. Options: 44.1kHz, 48kHz, 88.2kHz, 96kHz.
+
+**Bit Depth** — output bit depth. Default is 24-bit. Options: 16-bit, 24-bit, 32-bit, 32f (float).
+
+**Destination Base** — where output is created. Leave blank to default to the folder next to your source. The app creates a new subfolder named after your session with `-48` appended — you don't need to create anything manually.
+
+**Workers** — parallel conversions. Start at `6`. Lower if the NAS feels sluggish during a run; raise if your Mac is idle and you want it to go faster.
+
+**Dry Run** — simulates the run without converting anything. Use this to check paths and see how many files would be processed.
+
+**Verbose Logs** — shows every file in the output panel, including already-converted skips. Useful for troubleshooting or verifying the run.
 
 ### Run
 
-Click **Run Processing**. The output panel will show live progress as files are processed.
+Click **Run Processing**. The output panel shows live progress as files are processed.
 
 Lines are color-coded:
 - **Green** — file converted successfully
-- **Amber** — warning (e.g. file skipped, already converted)
+- **Amber** — warning (e.g. file skipped, already at target rate)
 - **Red** — error
 - **Gray** — skipped/already done
 
-When complete, a verification runs automatically and reports how many files were accounted for.
+When the job finishes, a **completion banner** appears showing the job name, total files converted, rejected (silent), and skipped. A verification runs automatically and reports how many files were accounted for.
 
-### Your paths are remembered
+### Job names and last-run memory
 
-After the first run, your source and destination paths are saved. Next time you open the app, they're pre-filled. The **Source Directory** field also keeps a dropdown of your last 10 source paths — useful when switching between sessions.
+Each run is named automatically from the source folder (e.g. processing `Boston` shows **"Boston"** as the job name). When you reopen the app, the status bar shows the result of the last job so you can see at a glance whether it completed successfully.
+
+### Your settings are remembered
+
+After the first run, your source directory, destination, workers setting, and NAS details are saved in `profile.json`. Next time you open the app, everything is pre-filled. The source directory field keeps a dropdown of your last 10 paths — useful when switching between sessions.
 
 ---
 
 ## Finding Your Paths
 
-### Mac (AutoMounter)
+### NAS mode (Mac)
 
-The NAS is mounted through AutoMounter, which puts files at a long path under your user Library. The easiest way to find it:
+In NAS mode you don't need to know the full path ahead of time:
 
-1. Open **Finder**
-2. Navigate to the folder on your NAS that you want to process
-3. Right-click the folder → **Get Info**
-4. Under **Where**, you'll see the full path — copy it
+1. Enter your NAS IP and click **Test Connection**
+2. Click the share chip to mount it
+3. Use the **folder browser** (📁 icon) to navigate to your session folder and click **Select**
 
-Or in Terminal:
-```bash
-ls ~/Library/Containers/nz.co.pixeleyes.AutoMounter/Data/Mounts/
+The path is filled in automatically.
+
+If you prefer to type the path manually: once the share is mounted, the mount point is something like `/Volumes/Stems`. Your session folder would be `/Volumes/Stems/_Ghost Tracks/PT Exports/Boston`.
+
+### Local mode (Mac)
+
+Use the **folder browser** to navigate your Mac's filesystem. No paths to type.
+
+### Docker mode (Synology / unRAID)
+
+Paths inside the container depend on how you've configured volumes in `docker-compose.yml`. For example, if your docker-compose has:
+
+```yaml
+volumes:
+  - /volume1/Stems:/data/stems
 ```
 
-This lists all your mounted shares. Your stems will be somewhere inside one of these.
-
-### Synology Docker
-
-When running in Docker, paths are the container-internal paths. The NAS volume is mounted at `/data/stems` (as configured in `docker-compose.yml`). So if your stems are at `/volume1/Stems/_Ghost Tracks/PT Exports/Boston` on the NAS, inside the container that becomes:
-
-```
-/data/stems/_Ghost Tracks/PT Exports/Boston
-```
+Then a session at `/volume1/Stems/_Ghost Tracks/PT Exports/Boston` on the NAS becomes `/data/stems/_Ghost Tracks/PT Exports/Boston` inside the container. The app shows the resolved host path below each field to help you confirm.
 
 ---
 
@@ -317,6 +293,48 @@ These live inside the output folder (e.g. `Boston-48/`) and track what happened 
 - **`rejects.json`** — files that were rejected (silent, zero-byte) with the reason
 
 If a run is interrupted, re-running will skip already-converted files and pick up where it left off.
+
+---
+
+## Overnight & Unattended Runs
+
+### Resuming an interrupted job
+
+Every file conversion is tracked in a `progress.json` file inside the output folder. If a run is interrupted for any reason — network drop, power loss, manual stop — just run it again with the same source and destination. Already-converted files are detected by their content hash and skipped automatically. Only the remaining files are processed.
+
+### Closing the browser tab
+
+Safe in all modes. The conversion job runs server-side and is not affected by the browser. When you reopen the app, the last job result is shown in the status bar so you can see whether it completed.
+
+### Sleeping your Mac (lid close)
+
+macOS suspends running processes but does not kill them. When your Mac wakes, the server resumes and the browser **automatically reconnects**. The log panel replays the last 500 lines so you can see everything that happened while you were away.
+
+If you open `start.command` while a job is running, it detects the active job and reopens the browser instead of restarting the server.
+
+### Closing the Terminal window (Mac modes)
+
+The conversion subprocess is **detached from Terminal** — it will continue writing files to disk even after the Terminal window closes. However, the web server is a child of Terminal and will stop when the window is closed. Output files are written correctly either way; you just won't be able to monitor progress in the UI until you restart. Re-running after the job finishes will skip all already-converted files.
+
+### Full Mac shutdown
+
+The job stops. Re-running after restart resumes from the last completed file via `progress.json`.
+
+### macOS notifications
+
+When a job completes, you receive a **macOS Notification Center alert** with the job name and file count — even if your Mac was asleep and just woke up, or if the browser was closed.
+
+### Recommended: Docker on NAS for overnight use
+
+For truly unattended overnight runs the right setup is Docker on your Synology or unRAID. The job runs entirely on the NAS hardware — independent of your Mac's sleep state, Terminal, or browser.
+
+| Scenario | Docker (NAS) | Mac — sleep | Mac — Terminal close | Mac — shutdown |
+|----------|:---:|:---:|:---:|:---:|
+| Job keeps running | ✅ | ✅ | ⚠️ files write, no UI | ❌ |
+| UI reconnects | ✅ | ✅ | restart server | restart server |
+| Resume from progress.json | ✅ | ✅ | ✅ | ✅ |
+| Completion notification (macOS) | ✅ | ✅ | — | — |
+| Last job shown on reopen | ✅ | ✅ | ✅ | ✅ |
 
 ---
 

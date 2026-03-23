@@ -17,5 +17,6 @@ __pycache__/
 *.pyo
 ghost-processing-venv/
 
-# Saved UI settings (contains personal paths)
+# Saved UI settings and runtime state (contain personal paths)
 profile.json
+last_job.json
