@@ -85,16 +85,13 @@ fi
 
 SUDOERS_FILE="/etc/sudoers.d/ghost-processing"
 RULE="$(whoami) ALL=(root) NOPASSWD: /sbin/mount_nfs, /bin/mkdir"
-NEEDS_SETUP=false
-if [ ! -f "$SUDOERS_FILE" ]; then
+# Check whether sudo mount_nfs is already passwordless by looking for
+# "password is required" in stderr. If sudo can run mount_nfs without
+# prompting, we're already configured — regardless of mount_nfs's own
+# exit code (it'll fail on bad args, but sudo itself won't complain).
+if sudo -n /sbin/mount_nfs 2>&1 | grep -q "password is required"; then
   NEEDS_SETUP=true
-fi
-# Also check that sudoers.d is included by the main sudoers file
-if ! sudo -n grep -q "includedir" /etc/sudoers 2>/dev/null; then
-  NEEDS_SETUP=true
-fi
-# Re-check: if sudo is already passwordless for mount_nfs, skip entirely
-if sudo -n /sbin/mount_nfs --help &>/dev/null 2>&1; then
+else
   NEEDS_SETUP=false
 fi
 

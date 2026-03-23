@@ -269,7 +269,6 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
             rate_suffix = f"{target_rate // 1000}k"
             dest_path = os.path.join(dest_dir, f"{base}-{rate_suffix}{ext}")
             os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-            logging.info(f"Analyzing: {rel_path}")
 
             # Skip if previously converted and source hasn't changed
             with file_lock:
@@ -309,6 +308,9 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                     is_list=True,
                 )
                 return None
+
+            # Silence check passed — log now so the phase bar tracks actual completions
+            logging.info(f"Analyzing: {rel_path}")
 
             # Convert
             bit_depth = config.get("bit_depth", 24)
