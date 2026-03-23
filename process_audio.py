@@ -63,7 +63,7 @@ def setup_logging(log_dir, verbose=False):
         handler.setFormatter(fmt)
         logger.addHandler(handler)
     logging.info(f"Run log: {run_log}")
-    return run_log
+    return run_log, run_ts
 
 
 def load_config(config_path):
@@ -496,7 +496,7 @@ def main():
     args = parser.parse_args()
 
     config = load_config(args.config)
-    setup_logging(config["log_dir"], config.get("verbose", False))
+    _, run_ts = setup_logging(config["log_dir"], config.get("verbose", False))
     signal.signal(signal.SIGINT, signal_handler)
 
     source_name = os.path.basename(os.path.normpath(config["source_dir"]))
@@ -504,6 +504,13 @@ def main():
     rate_suffix = f"{target_rate // 1000}k"
     dest_dir = os.path.join(config["dest_base"], f"{source_name}-{rate_suffix}")
     os.makedirs(dest_dir, exist_ok=True)
+
+    # Write a copy of this run's log into the dest folder so each conversion
+    # folder is self-contained — open it later and the full record is right there.
+    dest_log = os.path.join(dest_dir, f"run_{run_ts}.log")
+    dest_handler = logging.FileHandler(dest_log)
+    dest_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
+    logging.getLogger().addHandler(dest_handler)
 
     rejects_log = os.path.join(dest_dir, "rejects.json")
     progress_log = os.path.join(dest_dir, "progress.json")

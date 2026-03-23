@@ -300,6 +300,40 @@
       text-transform: uppercase;
       letter-spacing: 0.6px;
     }
+    .phase-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .phase-label {
+      font-size: 10px;
+      color: var(--text-dim);
+      font-weight: 500;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+      min-width: 130px;
+    }
+    .phase-track {
+      flex: 1;
+      height: 3px;
+      background: var(--surface2);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .phase-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      width: 0%;
+      transition: width 0.4s ease;
+    }
+    .phase-count {
+      font-size: 10px;
+      color: var(--text-dim);
+      min-width: 28px;
+      text-align: right;
+    }
 
     .log {
       background: #0a0a0a;
@@ -829,6 +863,11 @@
       <span class="status-label" id="status-label">Ready</span>
       <span class="last-run-chip hidden" id="last-run-chip"></span>
     </div>
+    <div class="phase-row hidden" id="phase-row">
+      <span class="phase-label" id="phase-label">Detecting silence</span>
+      <div class="phase-track"><div class="phase-fill" id="phase-fill"></div></div>
+      <span class="phase-count" id="phase-count"></span>
+    </div>
 
     <!-- Completion banner — shown when job finishes -->
     <div class="completion-banner hidden" id="completion-banner">
@@ -900,7 +939,28 @@
   const completionTitle  = document.getElementById('completion-title');
   const completionStats  = document.getElementById('completion-stats');
   const lastRunChip      = document.getElementById('last-run-chip');
+  const phaseRow         = document.getElementById('phase-row');
+  const phaseLabel       = document.getElementById('phase-label');
+  const phaseFill        = document.getElementById('phase-fill');
+  const phaseCount       = document.getElementById('phase-count');
   let rejectedCount = 0, skippedCount = 0, convertedCount = 0;
+  let totalFiles = 0, analyzedCount = 0, phaseConverting = false;
+
+  function updatePhase() {
+    if (totalFiles === 0) return;
+    if (!phaseConverting) {
+      phaseLabel.textContent = 'Detecting silence';
+      const pct = Math.round((analyzedCount / totalFiles) * 100);
+      phaseFill.style.width = pct + '%';
+      phaseCount.textContent = analyzedCount + '/' + totalFiles;
+    } else {
+      phaseLabel.textContent = 'Converting';
+      const done = convertedCount + rejectedCount + skippedCount;
+      const pct  = Math.round((done / totalFiles) * 100);
+      phaseFill.style.width = pct + '%';
+      phaseCount.textContent = done + '/' + totalFiles;
+    }
+  }
 
   const DEFAULTS = {
     target_sample_rate: 48000,
@@ -1028,10 +1088,13 @@
     rejectedList.innerHTML = '<li class="review-empty">None this run</li>';
     skippedList.innerHTML  = '<li class="review-empty">None this run</li>';
     rejectedCount = 0; skippedCount = 0; convertedCount = 0;
+    totalFiles = 0; analyzedCount = 0; phaseConverting = false;
     badgeRejected.textContent = '0 rejected';
     badgeSkipped.textContent  = '0 skipped';
     reviewCard.classList.add('hidden');
     completionBanner.classList.add('hidden');
+    phaseRow.classList.add('hidden');
+    phaseFill.style.width = '0%';
     lastRunChip.classList.remove('hidden');
     autoScroll = true;
     setStatus('', '');
@@ -1172,6 +1235,21 @@
       if (data.type === 'log') {
         addLine(data.message, classify(data.message));
         checkReviewLine(data.message);
+        // Phase tracking
+        const ml = data.message.toLowerCase();
+        if (!totalFiles) {
+          const m = ml.match(/found (\d+) audio files/);
+          if (m) { totalFiles = parseInt(m[1]); phaseRow.classList.remove('hidden'); }
+        }
+        if (ml.includes('analyzing:')) {
+          analyzedCount++;
+          updatePhase();
+        } else if (!phaseConverting && (ml.includes('converted:') || ml.includes('silent file') || ml.includes('skipping:') || ml.includes('already at'))) {
+          phaseConverting = true;
+          updatePhase();
+        } else if (phaseConverting) {
+          updatePhase();
+        }
       } else if (data.type === 'summary') {
         // Server-verified final counts — use these for the completion banner
         convertedCount = data.converted ?? convertedCount;
@@ -1183,6 +1261,7 @@
         setStatus(ok ? 'done' : 'error', ok ? 'Done' : 'Finished with errors');
         showCompletion(data.job_name || '', ok, convertedCount, rejectedCount, skippedCount);
         lastRunChip.classList.add('hidden'); // banner replaces chip while visible
+        phaseRow.classList.add('hidden');
         btnRun.disabled = false; btnStop.disabled = true;
         es.close(); es = null;
       } else if (data.type === 'error') {
