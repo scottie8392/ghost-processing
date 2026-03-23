@@ -44,22 +44,31 @@ docker-compose up -d
 
 ## 🟡 Validation & Testing (Not Yet Done)
 
-- [ ] **Full NFS conversion run** — end-to-end: connect to NAS → browse → select source → run → verify output files, names, sample rates, and bit depths are correct.
-- [ ] **Full SMB conversion run** — same as above via SMB protocol.
-- [ ] **Local mode conversion run** — source and dest on the Mac's local filesystem.
-- [ ] **All sample rate outputs** — test 44.1kHz, 48kHz, 88.2kHz, 96kHz outputs. Confirm files are correctly resampled and named.
+### Core conversion
+- [ ] **Local mode conversion run** — source and dest on the Mac's local filesystem. Do this first — no NAS dependency, fastest way to confirm the core pipeline works after the recent bug fixes.
+- [ ] **All sample rate outputs** — test 44.1kHz, 48kHz, 88.2kHz, 96kHz outputs. Confirm files are correctly resampled and named (e.g. `stem-48k.wav`, `stem-44k.wav`).
 - [ ] **All bit depth outputs** — test 16-bit, 24-bit, 32-bit, 32f (float). Confirm SoX command is correct for each and output files are valid.
-- [ ] **Silence detection calibration** — run against a known set of stems including intentionally silent tracks. Confirm correct rejection at default threshold (-50dB / 200ms).
+- [ ] **Silence detection calibration** — run against a known set of stems including intentionally silent tracks and sparse/SFX stems. Confirm correct rejection at default threshold (-50dB / 200ms). Use the analyzer (see 🟢 UI) to dial in settings first.
 - [ ] **AIFF source files** — confirm `.aiff` files decode correctly via FFmpeg/pydub and convert cleanly.
 - [ ] **Files with spaces and special characters in names** — confirm paths with spaces, parentheses, apostrophes pass through SoX subprocess correctly.
 - [ ] **Deep folder nesting** — confirm recursive processing handles 3+ levels of subdirectories and output mirrors the structure exactly.
 - [ ] **Resume from interrupted run** — kill a job mid-way, restart it, confirm already-converted files are skipped and the run completes correctly.
 - [ ] **Dry run mode** — confirm no files are written and the log correctly reports what would have happened.
 - [ ] **verify_audio.py after real run** — run the verifier against a completed job and confirm it accounts for all files.
-- [ ] **Watch mode end-to-end** — drop a new file into a watched folder and confirm it gets picked up and converted. Confirm stability_wait_sec prevents processing files still being written.
-- [ ] **Docker end-to-end** — docker-compose up, access UI, run a conversion, confirm output appears on the NAS volume.
+
+### NAS (Mac)
+- [ ] **Full NFS conversion run** — connect to NAS → browse → select source → run → verify output files, names, sample rates, and bit depths are correct.
+- [ ] **Full SMB conversion run** — same as above via SMB protocol.
 - [ ] **Multiple chips — same NAS, different shares** — confirm clicking chip A, browsing, then clicking chip B mounts and browses the new share independently.
 - [ ] **unRAID appdata NFS mount** — confirm this specific share mounts after re-applying the export in unRAID settings.
+- [ ] **NFS network drop during conversion** — simulate a network interruption mid-run (disable NAS interface or pull switch) and confirm: (a) the app detects the drop and logs it clearly rather than hanging silently, (b) the NFS retry logic (3 attempts + remount) fires correctly, (c) `progress.json` is intact when the network comes back, (d) restarting the job resumes from where it left off without re-converting completed files. Also test: laptop sleep/wake mid-run with NAS mounted.
+- [ ] **SMB network drop during conversion** — same scenario via SMB. SMB has different timeout behaviour than NFS on macOS — confirm it fails fast rather than blocking workers indefinitely.
+- [ ] **NAS reboot mid-run** — start a conversion, reboot the NAS, confirm the app surfaces a clear error and the job can be resumed cleanly once the NAS is back.
+
+### Docker (Synology)
+- [ ] **Fix docker-compose.yml before testing** — two gaps must be resolved first: (1) add a dest volume so converted files aren't lost on rebuild; (2) mount `config.docker.yaml` so paths can be configured without rebuilding the image. See 🟢 Infrastructure items.
+- [ ] **Docker end-to-end** — `docker compose up`, access UI from another device on the network, run a conversion, confirm output appears on the NAS volume and persists after container restart.
+- [ ] **Watch mode end-to-end** — drop a new file into a watched folder and confirm it gets picked up and converted. Confirm `stability_wait_sec` prevents processing files still being written.
 
 ---
 
