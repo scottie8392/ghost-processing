@@ -64,12 +64,13 @@ DEFAULT_PROFILE = {
 }
 
 # Runtime state
-_active_process = None
-_log_queue      = queue.Queue()
-_log_ring       = collections.deque(maxlen=500)   # recent lines for reconnecting clients
-_is_running     = False
-_lock           = threading.Lock()
-_current_job    = None   # {"name": str, "source": str} set when a job starts
+_active_process  = None
+_log_queue       = queue.Queue()
+_log_ring        = collections.deque(maxlen=500)   # recent lines for reconnecting clients
+_is_running      = False
+_stop_requested  = False   # True when user clicked Stop — distinguishes user-stop from crash
+_lock            = threading.Lock()
+_current_job     = None   # {"name": str, "source": str} set when a job starts
 
 
 # ---------------------------------------------------------------------------
@@ -413,11 +414,13 @@ def disconnect():
 
 @app.route("/run", methods=["POST"])
 def run():
-    global _active_process, _is_running, _current_job
+    global _active_process, _is_running, _current_job, _stop_requested
 
     with _lock:
         if _is_running:
             return jsonify({"error": "Already processing"}), 409
+
+    _stop_requested = False   # clear any previous stop flag before starting a new job
 
     data = request.json
     save_profile(data)
@@ -509,16 +512,22 @@ def run():
             _log_ring.append(summary_entry)
             _log_queue.put(summary_entry)
 
-            done_entry = {"type": "done", "returncode": rc, "job_name": job_name}
+            # Persist last job for reconnecting clients
+            if rc == 0:
+                job_status = "done"
+            elif _stop_requested:
+                job_status = "stopped"
+            else:
+                job_status = "error"
+
+            done_entry = {"type": "done", "returncode": rc, "job_name": job_name, "status": job_status}
             _log_ring.append(done_entry)
             _log_queue.put(done_entry)
-
-            # Persist last job for reconnecting clients
             last_job_record = {
                 "name":        job_name,
                 "source":      (_current_job or {}).get("source", ""),
                 "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "status":      "done" if rc == 0 else "error",
+                "status":      job_status,
                 "converted":   converted,
                 "rejected":    rejected,
                 "skipped":     skipped,
@@ -533,7 +542,12 @@ def run():
                 pass
             # macOS Notification Center alert when job finishes
             if sys.platform == "darwin":
-                status_word = "complete" if rc == 0 else "finished with errors"
+                if rc == 0:
+                    status_word = "complete"
+                elif _stop_requested:
+                    status_word = "stopped"
+                else:
+                    status_word = "finished with errors"
                 try:
                     subprocess.run(
                         ["osascript", "-e",
@@ -689,8 +703,9 @@ def browse():
 
 @app.route("/stop", methods=["POST"])
 def stop():
-    global _active_process
+    global _active_process, _stop_requested
     if _active_process and _active_process.poll() is None:
+        _stop_requested = True
         try:
             # Kill the entire process group — the subprocess was started with
             # start_new_session=True, so it and all its SoX workers share a

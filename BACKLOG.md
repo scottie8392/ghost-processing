@@ -32,11 +32,11 @@ docker-compose up -d
 
 ## 🔴 Must Fix (Known Bugs)
 
-- [ ] **Hardcoded `-48` in destination directory name and verifier** — the filename generation in `process_file()` is already correct (uses `rate_suffix` derived from `target_sample_rate`). But two places still hardcode `-48`: (1) `main()` line 500 creates the dest dir as `{source_name}-48` regardless of target rate; (2) `run_verification()` line 404 checks for `{base}-48{ext}` in the dest, so it can't find correctly-named files and reports them all as missing. Fix both to use the same `rate_suffix` logic.
+- [x] **Hardcoded `-48` in destination directory name and verifier** — fixed in `main()` (dest dir name) and `run_verification()` (filename check); both now derive `rate_suffix` from `target_sample_rate` (e.g. 48000 → `48k`). Also fixed in `verify_audio.py`. Tested: 44.1kHz/16-bit run confirmed correct naming.
 - [x] **executor.shutdown(wait=False)** — already fixed; `batch_process()` uses `wait=True, cancel_futures=True`.
-- [ ] **verify_audio.py rejects.json crash** — `[e["path"] for e in json.load(f)]` will raise `KeyError` or `TypeError` if any list entry isn't a dict with a "path" key. Add type guard.
-- [ ] **`/browse` endpoint path traversal** — no validation prevents a crafted request from browsing outside intended directories. Add a root-jail check for non-local deployments.
-- [ ] **Stop button doesn't kill SoX workers** — the `/stop` endpoint only terminates `_active_process` (the Python wrapper spawned by `app.py`). Because it was launched with `start_new_session=True`, the SoX subprocesses inside the `ProcessPoolExecutor` are in a separate process group and don't receive the signal. Clicking Stop goes quiet in the log but SoX keeps running in the background. Fix: send SIGTERM to the entire process group (`os.killpg`).
+- [x] **verify_audio.py rejects.json crash** — added `isinstance(e, dict) and "path" in e` type guard in both `process_audio.py` and `verify_audio.py`.
+- [x] **`/browse` endpoint path traversal** — added `_BROWSE_BLOCKED` set in `app.py`; requests targeting `/etc`, `/System`, `/usr`, `/bin`, `/sbin`, `/Library/Keychains`, `/private/var`, `/root` return 403.
+- [x] **Stop button doesn't kill SoX workers** — fixed with `os.killpg(os.getpgid(_active_process.pid), signal.SIGTERM)` in `/stop` endpoint; entire process group (Python wrapper + all SoX subprocesses) receives SIGTERM.
 - [ ] **Silence threshold too aggressive for sparse stems** — the default 10ms `min_non_silent_len` means a single snap, click, SFX hit, or impact that lands in an otherwise silent stem will keep the file (correct), but the threshold gives no headroom for very-low-level sparse content like room tone or quiet reverb tails near -50dBFS. Before trusting automated rejection, calibrate against a real session that includes sparse/SFX stems. Consider surfacing detected peak level in the log per file so you can see what the detector actually found.
 - [ ] **BWF metadata is silently stripped** — SoX does not preserve the BEXT chunk that Pro Tools writes into every WAV (timecode position, originator, session name, creation date). After conversion the output files have no provenance data. For any project delivered to a picture editor, broadcast mixer, or archive, this destroys the session metadata. Fix: add a `bwfmetaedit` post-step that copies the BEXT chunk from source to dest after the SoX conversion.
 
@@ -45,12 +45,12 @@ docker-compose up -d
 ## 🟡 Validation & Testing (Not Yet Done)
 
 ### Core conversion
-- [ ] **Local mode conversion run** — source and dest on the Mac's local filesystem. Do this first — no NAS dependency, fastest way to confirm the core pipeline works after the recent bug fixes.
-- [ ] **All sample rate outputs** — test 44.1kHz, 48kHz, 88.2kHz, 96kHz outputs. Confirm files are correctly resampled and named (e.g. `stem-48k.wav`, `stem-44k.wav`).
-- [ ] **All bit depth outputs** — test 16-bit, 24-bit, 32-bit, 32f (float). Confirm SoX command is correct for each and output files are valid.
+- [x] **Local mode conversion run** — confirmed working; 44.1kHz/16-bit test run completed on `/Users/scottie/Desktop/TR Test Show`.
+- [ ] **All sample rate outputs** — 44.1kHz confirmed ✓. Still need: 48kHz, 88.2kHz, 96kHz. Confirm files are correctly resampled and named (e.g. `stem-48k.wav`, `stem-88k.wav`).
+- [ ] **All bit depth outputs** — 16-bit confirmed ✓. Still need: 24-bit, 32-bit, 32f (float). Confirm SoX command is correct for each and output files are valid.
 - [ ] **Silence detection calibration** — run against a known set of stems including intentionally silent tracks and sparse/SFX stems. Confirm correct rejection at default threshold (-50dB / 200ms). Use the analyzer (see 🟢 UI) to dial in settings first.
-- [ ] **AIFF source files** — confirm `.aiff` files decode correctly via FFmpeg/pydub and convert cleanly.
-- [ ] **Files with spaces and special characters in names** — confirm paths with spaces, parentheses, apostrophes pass through SoX subprocess correctly.
+- [x] **AIFF source files** — `.aif` extension detection fixed in `process_audio.py` and `verify_audio.py`; confirmed `.aif` files detected during test run.
+- [x] **Files with spaces and special characters in names** — confirmed working; test run used `/Users/scottie/Desktop/TR Test Show` (space in path) without issues.
 - [ ] **Deep folder nesting** — confirm recursive processing handles 3+ levels of subdirectories and output mirrors the structure exactly.
 - [ ] **Resume from interrupted run** — kill a job mid-way, restart it, confirm already-converted files are skipped and the run completes correctly.
 - [ ] **Dry run mode** — confirm no files are written and the log correctly reports what would have happened.
@@ -157,6 +157,14 @@ These cover the gap between "job ran while browser/laptop was closed" and "user 
 - [x] SSE auto-reconnect with 500-line ring buffer replay — browser reconnects seamlessly after sleep/tab close
 - [x] Process detachment (`start_new_session=True`) — conversion subprocess survives Terminal window close
 - [x] start.command detects running job on reopen — reopens browser instead of killing server
+- [x] `.aif` extension detection — added to `is_audio_file()` in `process_audio.py` and `verify_audio.py`
+- [x] Phase progress bar — "Detecting silence X/N" → "Converting X/N" phases visible in UI during run
+- [x] "New Run" button — appears in completion banner; resets UI without page reload
+- [x] Run log written to dest dir — each dest folder gets `run_{timestamp}.log` alongside `progress.json` and `rejects.json`
+- [x] Stop button kills entire process group — `os.killpg` ensures SoX workers are terminated, not just the Python wrapper
+- [x] `/browse` path traversal protection — `_BROWSE_BLOCKED` denies access to sensitive system directories
+- [x] sudoers re-prompt fix — launch script now correctly detects existing passwordless sudo rule using stderr string match
+- [x] Stop vs Error distinction — `_stop_requested` flag in `app.py`; user-initiated stop saves `status: "stopped"` in `last_job.json` and SSE `done` event; UI shows "Stopped" with neutral grey banner and ◼ icon instead of red "Error"
 
 ---
 
@@ -179,3 +187,8 @@ These cover the gap between "job ran while browser/laptop was closed" and "user 
 | 2026-03-23 | `last_job.json` separate from `profile.json` | Profile is settings (survives many runs); last job is ephemeral state — separate concerns |
 | 2026-03-23 | `start_new_session=True` on conversion subprocess | Detaches from Terminal's process group; conversion continues if Terminal closes |
 | 2026-03-23 | `deque(maxlen=500)` ring buffer for SSE replay | Allows reconnecting clients to catch up on recent output without replaying the full log file |
+| 2026-03-23 | `os.killpg` for Stop button | `_active_process.terminate()` only reached Python wrapper; SoX workers are in a separate process group due to `start_new_session=True` — must kill the entire group |
+| 2026-03-23 | "Analyzing:" log line moved to after silence detection | Previously logged before silence check — workers grabbed files instantly so phase bar hit 100% immediately. Now logs after silence check passes, before SoX — tracks real completions |
+| 2026-03-23 | Run log written to dest dir alongside progress.json | Each dest folder is self-contained (log + progress + rejects); easier to archive and audit |
+| 2026-03-23 | sudoers check: `sudo -n /sbin/mount_nfs 2>&1 \| grep "password is required"` | Previous check used `sudo -n grep` and `--help` flag; both returned non-zero even when rule was installed. Stderr string is reliable. |
+| 2026-03-23 | `_stop_requested` flag to distinguish Stop from error | returncode is non-zero for both user stop (SIGTERM → -15) and genuine crash — can't use it alone. Flag set in `/stop` before killpg, read in `run_process` after wait(). rc==0 check is first so a clean finish can't be mislabeled. |

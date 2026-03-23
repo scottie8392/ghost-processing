@@ -290,6 +290,7 @@
     .dot.running { background: var(--accent); animation: pulse 1.1s ease-in-out infinite; }
     .dot.done    { background: var(--success); }
     .dot.error   { background: var(--error); }
+    .dot.stopped { background: var(--muted); }
 
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.2} }
 
@@ -376,8 +377,9 @@
       margin-bottom: 14px;
       text-align: center;
     }
-    .completion-banner.done  { background: rgba(80,200,120,0.07); border: 1px solid rgba(80,200,120,0.2); }
-    .completion-banner.error { background: rgba(200,80,80,0.07);  border: 1px solid rgba(200,80,80,0.2); }
+    .completion-banner.done    { background: rgba(80,200,120,0.07);  border: 1px solid rgba(80,200,120,0.2); }
+    .completion-banner.error   { background: rgba(200,80,80,0.07);   border: 1px solid rgba(200,80,80,0.2); }
+    .completion-banner.stopped { background: rgba(140,140,140,0.07); border: 1px solid rgba(140,140,140,0.2); }
     .completion-icon {
       font-size: 36px;
       line-height: 1;
@@ -1160,10 +1162,14 @@
     }
   }
 
-  function showCompletion(name, ok, converted, rejected, skipped) {
-    completionBanner.className = 'completion-banner ' + (ok ? 'done' : 'error');
-    completionIcon.textContent  = ok ? '✓' : '✗';
-    completionTitle.textContent = (name ? name + ' — ' : '') + (ok ? 'Done' : 'Finished with errors');
+  function showCompletion(name, status, converted, rejected, skipped) {
+    const ok      = status === 'done';
+    const stopped = status === 'stopped';
+    const bannerClass = ok ? 'done' : (stopped ? 'stopped' : 'error');
+    completionBanner.className = 'completion-banner ' + bannerClass;
+    completionIcon.textContent  = ok ? '✓' : (stopped ? '◼' : '✗');
+    completionTitle.textContent = (name ? name + ' — ' : '') +
+      (ok ? 'Done' : (stopped ? 'Stopped' : 'Finished with errors'));
     completionStats.innerHTML =
       `<span class="cs-converted">${converted} converted</span>` +
       `<span class="cs-sep">·</span>` +
@@ -1175,13 +1181,16 @@
 
   function showLastRunChip(job) {
     if (!job) return;
-    const ok   = job.status === 'done';
+    const ok      = job.status === 'done';
+    const stopped = job.status === 'stopped';
+    const label   = ok ? 'Done' : (stopped ? 'Stopped' : 'Error');
+    const cls     = ok ? 'lr-ok' : 'lr-err';
     const when = job.finished_at
       ? new Date(job.finished_at).toLocaleString([], {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})
       : '';
     lastRunChip.innerHTML =
-      `Last run: <span class="${ok ? 'lr-ok' : 'lr-err'}">${job.name || 'Job'}</span>` +
-      ` — ${ok ? 'Done' : 'Error'}` +
+      `Last run: <span class="${cls}">${job.name || 'Job'}</span>` +
+      ` — ${label}` +
       (when ? ` · ${when}` : '') +
       ` · ${job.converted ?? '?'} converted`;
     lastRunChip.classList.remove('hidden');
@@ -1257,9 +1266,12 @@
         skippedCount   = data.skipped   ?? skippedCount;
       } else if (data.type === 'done') {
         _streamDone = true;
-        const ok = data.returncode === 0;
-        setStatus(ok ? 'done' : 'error', ok ? 'Done' : 'Finished with errors');
-        showCompletion(data.job_name || '', ok, convertedCount, rejectedCount, skippedCount);
+        const jobStatus = data.status || (data.returncode === 0 ? 'done' : 'error');
+        const ok        = jobStatus === 'done';
+        const stopped   = jobStatus === 'stopped';
+        const statusTxt = ok ? 'Done' : (stopped ? 'Stopped' : 'Finished with errors');
+        setStatus(ok ? 'done' : (stopped ? 'stopped' : 'error'), statusTxt);
+        showCompletion(data.job_name || '', jobStatus, convertedCount, rejectedCount, skippedCount);
         lastRunChip.classList.add('hidden'); // banner replaces chip while visible
         phaseRow.classList.add('hidden');
         btnRun.disabled = false; btnStop.disabled = true;
