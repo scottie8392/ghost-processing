@@ -1,3 +1,7 @@
+> **Claude — read `CLAUDE.md` first.** It has full project context, current state, known bugs, and immediate next steps. Pick up from there.
+
+---
+
 # Ghost Processing
 
 Batch audio conversion tool for music stems. Detects and discards silent/empty files, then resamples WAV/AIFF to a target rate (48kHz default) and bit depth (24-bit default) using SoX with shaped dithering. Runs as a local web app — double-click to launch, connect to your NAS, click Run.
