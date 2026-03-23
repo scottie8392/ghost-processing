@@ -32,10 +32,13 @@ docker-compose up -d
 
 ## 🔴 Must Fix (Known Bugs)
 
-- [ ] **Hardcoded `-48` suffix in output filenames** — `process_audio.py` ~line 269 always appends `-48` regardless of the selected target rate. If the user converts to 44.1kHz, files get named `-48` anyway. Fix: derive suffix from actual `target_sample_rate` (e.g. `48000 → -48k`, `44100 → -441k`, `96000 → -96k`).
+- [ ] **Hardcoded `-48` in destination directory name and verifier** — the filename generation in `process_file()` is already correct (uses `rate_suffix` derived from `target_sample_rate`). But two places still hardcode `-48`: (1) `main()` line 500 creates the dest dir as `{source_name}-48` regardless of target rate; (2) `run_verification()` line 404 checks for `{base}-48{ext}` in the dest, so it can't find correctly-named files and reports them all as missing. Fix both to use the same `rate_suffix` logic.
 - [ ] **executor.shutdown(wait=False)** — in `batch_process()`, the ProcessPoolExecutor is shut down with `wait=False`, which can leave worker processes running after the job ends. Change to `wait=True`.
 - [ ] **verify_audio.py rejects.json crash** — `[e["path"] for e in json.load(f)]` will raise `KeyError` or `TypeError` if any list entry isn't a dict with a "path" key. Add type guard.
 - [ ] **`/browse` endpoint path traversal** — no validation prevents a crafted request from browsing outside intended directories. Add a root-jail check for non-local deployments.
+- [ ] **Stop button doesn't kill SoX workers** — the `/stop` endpoint only terminates `_active_process` (the Python wrapper spawned by `app.py`). Because it was launched with `start_new_session=True`, the SoX subprocesses inside the `ProcessPoolExecutor` are in a separate process group and don't receive the signal. Clicking Stop goes quiet in the log but SoX keeps running in the background. Fix: send SIGTERM to the entire process group (`os.killpg`).
+- [ ] **Silence threshold too aggressive for sparse stems** — the default 10ms `min_non_silent_len` means a single snap, click, SFX hit, or impact that lands in an otherwise silent stem will keep the file (correct), but the threshold gives no headroom for very-low-level sparse content like room tone or quiet reverb tails near -50dBFS. Before trusting automated rejection, calibrate against a real session that includes sparse/SFX stems. Consider surfacing detected peak level in the log per file so you can see what the detector actually found.
+- [ ] **BWF metadata is silently stripped** — SoX does not preserve the BEXT chunk that Pro Tools writes into every WAV (timecode position, originator, session name, creation date). After conversion the output files have no provenance data. For any project delivered to a picture editor, broadcast mixer, or archive, this destroys the session metadata. Fix: add a `bwfmetaedit` post-step that copies the BEXT chunk from source to dest after the SoX conversion.
 
 ---
 
@@ -70,16 +73,21 @@ docker-compose up -d
 - [ ] **Progress.json stale entry cleanup** — if a converted file is later deleted from dest, it remains marked "done" in `progress.json`. Add a `--clean` flag to `verify_audio.py` that removes stale entries so the file gets re-converted on next run.
 - [ ] **Config validation before run** — validate all values (sample rate, bit depth, silence threshold) in `app.py` before spawning the subprocess, with clear error messages in the UI rather than a crash in the log.
 
+### Reconnection & Job State Awareness
+These cover the gap between "job ran while browser/laptop was closed" and "user knows what happened when they reopen the app."
+
+- [ ] **Prominent job result banner on reconnect** — `last_job.json` is currently shown in the status bar, which is easy to miss. On page load, if `last_job.json` exists and no job is currently running, show a prominent banner: job name, outcome (✓ complete / ✗ failed), file counts, and the timestamp it finished. Should be impossible to miss and should require a dismiss action to clear.
+- [ ] **Orphaned process detection on server restart** — when `app.py` starts, if a `process_audio.py` subprocess is still running from a previous server instance (i.e., the server died but the detached job kept going), the new server has no idea. Implement a PID file: write the PID of the running `process_audio.py` to `running_job.pid` on start; delete it on completion. On server startup, if the PID file exists and the process is alive, show a warning in the UI: "A conversion job from a previous session is still running — do not start a new job." If the PID file exists but the process is dead, it means the job died uncleanly — surface that too.
+- [ ] **Docker / remote: webhook notification on completion** — `osascript` notifications only fire on macOS. In Docker mode (container running on the NAS, browser on another device), there is no push notification at all. Add an optional webhook URL field in settings — on job completion, POST a JSON payload to it. Works with ntfy, Slack incoming webhooks, or any HTTP endpoint. One config field, no dependencies.
+
 ### Workflow
 - [ ] **Named presets** — save and recall complete configurations as named profiles (e.g. "unRAID 48k/24", "Synology 44.1k/16", "Local Quick"). One click to load a known-good setup for a specific studio context.
 - [ ] **Session queue** — queue multiple source folders to process sequentially. Add a queue panel to the UI with reorder/remove controls. Essential for unattended overnight runs across many sessions.
-- [ ] **Re-process rejected files** — button to retry rejected files with a temporarily lowered silence threshold. Useful when a stem is very quiet but not actually silent (e.g. room tone, reverb tail).
 - [ ] **Re-process rejected files** — button in the File Review panel to retry rejected files with a temporarily lowered silence threshold. Useful when a stem is very quiet but not actually silent (e.g. room tone, reverb tail).
 - [ ] **Folder exclude patterns** — option to skip subdirectories by name pattern (e.g. "Bounce", "Reference", "Archive"). Avoids accidentally converting non-stem files mixed into the session folder.
 - [ ] **Multiple source dirs** — accept a list of source paths in one run rather than one at a time.
 
 ### Audio Quality
-- [ ] **BWF metadata preservation** — verify that Broadcast WAV chunks (BEXT chunk: timestamp, originator, description, timecode) survive the SoX conversion chain. If not, implement a copy step using `bwfmetaedit` or similar.
 - [ ] **AIFF output option** — some studios deliver stems as AIFF. Add an output format dropdown (WAV / AIFF) alongside sample rate and bit depth.
 - [ ] **Source sample rate reporting** — in the File Review panel or log, show the detected sample rate of each source file before conversion. Useful for spotting sessions with mixed rates.
 
@@ -91,9 +99,10 @@ docker-compose up -d
 
 ### Infrastructure
 - [ ] **Auto-discover NAS on network** — use mDNS/Bonjour to detect NAS devices on the local subnet and suggest them in the IP field. Removes the need to know or remember the NAS IP.
-- [ ] **Webhook / email on completion** — for unattended overnight runs, POST to a webhook URL (Slack, ntfy, etc.) or send an email when the job finishes or fails.
 - [ ] **Remove setup.sh** — now fully redundant since `start.command` handles everything. Keep for reference or delete to reduce confusion.
 - [ ] **Docker: template hot-reload in container** — `TEMPLATES_AUTO_RELOAD` is set in app.py but Waitress doesn't use Flask's reloader. Consider a volume mount for the template in docker-compose.yml for easier UI iteration without rebuilds.
+- [ ] **`save_profile()` is not atomic** — `app.py`'s `save_profile()` uses a plain `open()` + `json.dump()`, unlike the atomic tempfile+fsync+rename pattern used correctly in `process_audio.py`. Low risk for a local app but inconsistent — a crash mid-write could corrupt `profile.json`.
+- [ ] **Completion counts parsed from log text** — `run_process()` in `app.py` counts converted/rejected/skipped by pattern-matching stdout strings. If a log message changes wording, counts silently go wrong. Better: have `process_audio.py` emit a structured JSON summary line at the end and parse that.
 
 ---
 
@@ -126,7 +135,7 @@ docker-compose up -d
 - [x] Terminal URL with Ctrl+click hint
 - [x] setup.sh merged into start.command (single entry point)
 - [x] Settings persist across sessions via `profile.json`
-- [x] Atomic JSON writes (tempfile + fsync + rename) for profile and progress
+- [x] Atomic JSON writes (tempfile + fsync + rename) for `progress.json` — note: `save_profile()` in `app.py` still uses a plain write; see Infrastructure backlog item
 - [x] Job naming from source directory basename (e.g. processing `Boston` shows "Boston")
 - [x] Completion banner — visual ✓/✗ indicator with job name, converted/rejected/skipped counts
 - [x] last_job.json persistence — last job result shown in status bar on fresh page load
@@ -143,7 +152,7 @@ docker-compose up -d
 |------|----------|-----------|
 | 2026-03-22 | SoX + shaped dither over pydub resampling | Better quality; `rate -v` + `dither -s` reduces quantization noise on downsample |
 | 2026-03-22 | Remove normalization | Stems must preserve original levels for mixing |
-| 2026-03-22 | Output naming: `{name}-48.wav` | Simple, unambiguous — though suffix should reflect actual rate (pending bug fix) |
+| 2026-03-22 | Output naming: `{name}-{rate}k.wav` | Simple, unambiguous — filename generation correct; directory naming and verifier still use hardcoded `-48` (see 🔴 bugs) |
 | 2026-03-22 | Fork start method for multiprocessing | Avoids lock init issues on macOS with spawn |
 | 2026-03-22 | Docker platform: `linux/amd64` | Synology NAS is Intel x86_64 |
 | 2026-03-23 | Remove Share Path field from NAS UI | Auto-detected from source path using `detect_nas_share()` — one less field to fill |

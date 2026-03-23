@@ -67,7 +67,9 @@ The app is **feature-complete and working** for its primary use case. All major 
 - Or: create repo at github.com/new (no README init), then `git remote add origin <url> && git push -u origin main`
 
 ### 2. Fix known bugs (see BACKLOG.md 🔴 section)
-- **Hardcoded `-48` suffix** in `process_audio.py` ~line 269 — always appends `-48` regardless of target rate. Fix: derive suffix from `target_sample_rate`.
+- **Hardcoded `-48` in dest directory name and verifier** — filename generation in `process_file()` is already correct. Bugs remain in: `main()` line 500 (dest dir named `{source_name}-48`) and `run_verification()` line 404 (checks for `{base}-48` in filenames, so misses correctly-named output files). Fix both to use the same `rate_suffix` logic.
+- **Stop button doesn't kill SoX workers** — `/stop` only terminates the Python wrapper; SoX processes run in a separate process group (`start_new_session=True`) and keep running. Fix: `os.killpg`.
+- **BWF metadata stripped by SoX** — Pro Tools BEXT chunks (timecode, originator) are not preserved. Fix: `bwfmetaedit` post-step.
 - **`executor.shutdown(wait=False)`** in `batch_process()` — change to `wait=True` to prevent orphaned workers.
 - **`verify_audio.py` rejects.json crash** — add type guard before `e["path"]` access.
 - **`/browse` path traversal** — add root-jail validation.
