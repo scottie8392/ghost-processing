@@ -185,6 +185,9 @@ Per file in `process_file()`:
 | Docker platform `linux/amd64` | Synology NAS is Intel x86_64 |
 | "Analyzing:" log after silence check | Phase bar tracks completions, not worker pickups — bar fills accurately |
 | `_stop_requested` flag for Stop status | `/stop` sets flag before killpg; `run_process` reads it after wait() to write `"stopped"` vs `"error"` — can't use returncode alone since both are non-zero |
+| `output_suffix(rate, depth)` helper | Dest dirs and filenames include both rate and depth e.g. `48k-24b`; prevents collisions across bit depths and makes skip logic unambiguous |
+| 32f AIF/AIFF → .wav output | AIFF can't encode float; SoX silently falls back to 32i. Force .wav for 32f+AIF sources. Same ext swap mirrored in both verifiers. |
+| Checkboxes as pill toggles | All `input[type="checkbox"]` styled as dark-surface pill toggles with amber knob — default white checkbox breaks dark theme |
 
 ---
 

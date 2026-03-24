@@ -121,7 +121,23 @@
       color: var(--text);
       cursor: pointer;
     }
-    input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+    input[type="checkbox"] {
+      appearance: none; -webkit-appearance: none;
+      width: 30px; height: 17px; flex-shrink: 0;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      position: relative; cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    input[type="checkbox"]::after {
+      content: ''; position: absolute;
+      width: 11px; height: 11px; border-radius: 50%;
+      background: #555; top: 2px; left: 2px;
+      transition: transform 0.15s, background 0.15s;
+    }
+    input[type="checkbox"]:checked { background: rgba(240,160,48,0.15); border-color: rgba(240,160,48,0.55); }
+    input[type="checkbox"]:checked::after { transform: translateX(13px); background: var(--accent); }
 
     details { margin-top: 14px; }
     details summary {
@@ -656,7 +672,6 @@
 
   <!-- NAS Connection -->
   <div class="card" id="nas-card">
-    <div class="card-title">NAS Connection</div>
 
     <div class="row">
       <div class="field">
@@ -757,15 +772,10 @@
         <input type="number" id="max_workers" min="1" max="16" value="6">
         <div class="hint">Parallel conversions. Start at <code>6</code> — lower if the NAS feels sluggish, raise if your Mac is idle.</div>
       </div>
-      <div class="field" style="display:flex; align-items:flex-end; padding-bottom:1px;">
-        <div class="checks">
-          <label class="check-label" title="Simulates the run without writing any files. Shows exactly what would be converted, skipped, or rejected.">
-            <input type="checkbox" id="dry_run"> Dry Run
-          </label>
-          <label class="check-label" title="Shows every file processed including skips. Useful when a run produces unexpected results and you need to see exactly what happened to each file.">
-            <input type="checkbox" id="verbose"> Verbose Logs
-          </label>
-        </div>
+      <div class="field">
+        <label class="field-label" for="dry_run">Dry Run</label>
+        <input type="checkbox" id="dry_run" style="margin-top:5px;">
+        <div class="hint">Simulates the run without writing any files. Shows exactly what would be converted, skipped, or rejected — useful before committing a large batch.</div>
       </div>
     </div>
 
@@ -779,7 +789,6 @@
         </div>
 
         <!-- Audio Conversion -->
-        <div class="adv-section-label">Audio Conversion</div>
         <div class="row">
           <div class="field">
             <label class="field-label">Target Sample Rate</label>
@@ -824,15 +833,10 @@
 
         <!-- Watch Mode -->
         <div class="adv-section">
-          <div class="adv-section-label">Watch Mode</div>
           <div class="row">
             <div class="field">
-              <div class="checks">
-                <label class="check-label">
-                  <input type="checkbox" id="watch_mode" onchange="toggleWatchFields()">
-                  Enable Watch Mode
-                </label>
-              </div>
+              <label class="field-label" for="watch_mode">Watch Mode</label>
+              <input type="checkbox" id="watch_mode" onchange="toggleWatchFields()" style="margin-top:5px;">
               <div class="hint">Continuously monitor the source folder and process new files as they appear, instead of a one-time batch run.</div>
             </div>
             <div class="field" id="field_stability_wait" style="visibility:hidden">
@@ -845,12 +849,16 @@
 
         <!-- Logging -->
         <div class="adv-section">
-          <div class="adv-section-label">Logging</div>
           <div class="field">
             <label class="field-label">Log Directory</label>
             <input type="text" id="log_dir"
                    placeholder="(default: logs/ inside project folder)">
             <div class="hint">Each run creates a timestamped file.</div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="verbose">Verbose Logs</label>
+            <input type="checkbox" id="verbose" style="margin-top:5px;">
+            <div class="hint">Shows every file processed including skips. Useful when a run produces unexpected results and you need to see exactly what happened to each file.</div>
           </div>
         </div>
 

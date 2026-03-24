@@ -79,7 +79,7 @@ docker-compose up -d
 - [ ] **Pre-flight check before run** — before starting, validate: source path exists and is readable, dest path is writable, SoX is installed and correct version, sufficient disk space for estimated output. Show a summary in the UI before committing.
 - [ ] **Realistic progress bar** — true percentage (files done / total), elapsed time, and ETA. Currently the log scrolls but there's no summary-level progress indicator.
 - [ ] **Health check page** — `/health` endpoint showing SoX version, FFmpeg version, Python version, active NFS mounts, disk space on source and dest. Useful for diagnosing issues without opening Terminal.
-- [ ] **Log rotation** — cap individual log files at a reasonable size (e.g. 10MB) and rotate. Currently logs grow unbounded.
+- [ ] **Log rotation / pruning** — cap individual log files at a reasonable size (e.g. 10MB) and rotate. Also prune old log files from the central `logs/` directory after N days or when count exceeds a limit. Currently logs accumulate unbounded.
 - [ ] **Progress.json stale entry cleanup** — if a converted file is later deleted from dest, it remains marked "done" in `progress.json`. Add a `--clean` flag to `verify_audio.py` that removes stale entries so the file gets re-converted on next run.
 - [ ] **Dest file integrity check on resume** — the resume logic currently checks that the dest file exists and the source hash matches, but does not verify the dest file itself. A truncated write, disk error, or corruption after conversion would be silently skipped on re-run. Fix: store a `dest_hash` in `progress.json` alongside `source_hash` at write time, and verify it on resume — if it doesn't match, re-convert. Also makes `verify_audio.py` more useful since it can flag corrupt outputs without needing the source.
 - [ ] **Config validation before run** — validate all values (sample rate, bit depth, silence threshold) in `app.py` before spawning the subprocess, with clear error messages in the UI rather than a crash in the log.
@@ -166,6 +166,13 @@ These cover the gap between "job ran while browser/laptop was closed" and "user 
 - [x] `/browse` path traversal protection — `_BROWSE_BLOCKED` denies access to sensitive system directories
 - [x] sudoers re-prompt fix — launch script now correctly detects existing passwordless sudo rule using stderr string match
 - [x] Stop vs Error distinction — `_stop_requested` flag in `app.py`; user-initiated stop saves `status: "stopped"` in `last_job.json` and SSE `done` event; UI shows "Stopped" with neutral grey banner and ◼ icon instead of red "Error"
+- [x] Output suffix includes bit depth — `output_suffix(rate, depth)` helper; dest dirs and filenames now `{name}-48k-24b/`, `stem-48k-24b.wav` etc. Prevents collisions when converting same source to different bit depths
+- [x] Skip logic checks both rate AND bit depth — converting same source to different bit depth at same sample rate now triggers conversion instead of skipping
+- [x] 32f AIF/AIFF sources output as .wav — AIFF can't encode floating-point PCM; SoX silently falls back to 32i. Fixed by forcing .wav output for 32f+AIF sources. Verifier updated to match.
+- [x] Verification summary fixed — `run_verification()` was counting `skipped_rate` entries as converted; split into `n_converted` / `n_skipped`
+- [x] Log note styled as amber callout box — subtle amber tint + left border accent; moved into btn-row to fill space beside Run/Stop
+- [x] Checkboxes styled as dark-theme pill toggles — amber knob on check, matches dark UI
+- [x] Dry Run moved to its own field with field-label + hint (matches Workers layout); Verbose Logs moved to Advanced → Logging section
 
 ---
 
