@@ -1002,6 +1002,8 @@
     const note = document.getElementById('log-note');
     if (mode === 'docker') {
       note.textContent = 'Running on your NAS — safe to close this tab or sleep your Mac. Reopen to rejoin. If interrupted, re-running resumes from where it stopped.';
+    } else if (mode === 'nas') {
+      note.textContent = 'Closing this tab is safe. Keep Terminal open while converting. If interrupted, re-running resumes from where it stopped.';
     } else {
       note.textContent = 'Closing this tab is safe. Keep Terminal open while converting. If interrupted, re-running resumes from where it stopped.';
     }
