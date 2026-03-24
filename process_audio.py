@@ -292,7 +292,12 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
             base, ext = os.path.splitext(rel_path)
             bit_depth = config.get("bit_depth", 24)
             suffix    = output_suffix(target_rate, bit_depth)
-            dest_path = os.path.join(dest_dir, f"{base}-{suffix}{ext}")
+            # AIFF can't encode floating-point PCM — SoX silently falls back to
+            # 32i. When 32f is requested for an AIF/AIFF source, output as .wav
+            # which reliably supports float.
+            is_float = str(bit_depth) == "32f"
+            dest_ext  = ".wav" if (is_float and ext.lower() in (".aif", ".aiff")) else ext
+            dest_path = os.path.join(dest_dir, f"{base}-{suffix}{dest_ext}")
             os.makedirs(os.path.dirname(dest_path), exist_ok=True)
 
             # Skip if previously converted and source hasn't changed
