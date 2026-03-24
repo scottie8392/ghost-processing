@@ -56,15 +56,13 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - All bit depths: 16-bit, 24-bit, 32-bit, 32f — correct encoding confirmed with soxi
 - 32f with AIF/AIFF source → output as .wav (AIFF can't encode float; fixed)
 - Already-at-target skip fires correctly when both rate AND bit depth match
+- Resume from interrupted run — 3 stop/resume cycles confirmed; progress.json correctly gates skips; partial dest files re-converted by design
 - `.aif` (single-f) files correctly detected and converted
 - Ableton `.asd` sidecar files correctly ignored
 - Silence detection: truly silent file rejected; sparse/noisy content correctly kept
 
 ### Not yet tested:
-- 88.2kHz, 96kHz outputs
-- 32-bit and 32f (float) outputs
 - Deep folder nesting
-- Resume from interrupted run (partial completion)
 - Dry run mode
 - NFS end-to-end conversion run
 - SMB end-to-end conversion run

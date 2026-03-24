@@ -52,7 +52,7 @@ docker-compose up -d
 - [x] **AIFF source files** — `.aif` extension detection fixed in `process_audio.py` and `verify_audio.py`; confirmed `.aif` files detected during test run.
 - [x] **Files with spaces and special characters in names** — confirmed working; test run used `/Users/scottie/Desktop/TR Test Show` (space in path) without issues.
 - [ ] **Deep folder nesting** — confirm recursive processing handles 3+ levels of subdirectories and output mirrors the structure exactly.
-- [ ] **Resume from interrupted run** — kill a job mid-way, restart it, confirm already-converted files are skipped and the run completes correctly.
+- [x] **Resume from interrupted run** — tested with 3 stop/resume cycles: stop during silence detection (no progress written → re-runs), stop after conversion (progress written → skips), stop before file starts (re-runs). Final run picked up exactly where it left off, verification clean. Note: partial dest file (stop mid-SoX write) handled correctly by design — progress.json only written on success, so partial file gets overwritten on resume.
 - [ ] **Dry run mode** — confirm no files are written and the log correctly reports what would have happened.
 - [ ] **verify_audio.py after real run** — run the verifier against a completed job and confirm it accounts for all files.
 
