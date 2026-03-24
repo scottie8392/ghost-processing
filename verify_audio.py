@@ -99,7 +99,8 @@ def main():
             continue
         rel = os.path.relpath(source_path, source_dir)
         base, ext = os.path.splitext(rel)
-        dest_path = os.path.join(dest_dir, f"{base}-{suffix}{ext}")
+        dest_ext  = ".wav" if (is_float and ext.lower() in (".aif", ".aiff")) else ext
+        dest_path = os.path.join(dest_dir, f"{base}-{suffix}{dest_ext}")
         if not os.path.exists(dest_path):
             missing_dest.append(source_path)
         else:

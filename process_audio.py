@@ -435,13 +435,16 @@ def run_verification(config, dest_dir, progress_log, rejects_log):
 
     target_rate = config.get("target_sample_rate", 48000)
     bit_depth   = config.get("bit_depth", 24)
+    is_float    = str(bit_depth) == "32f"
     suffix      = output_suffix(target_rate, bit_depth)
     missing_dest = []
     for rel, data in progress.items():
         if data.get("status") != "converted":
             continue
         base, ext = os.path.splitext(rel)
-        dest_path = os.path.join(dest_dir, f"{base}-{suffix}{ext}")
+        # Mirror the 32f AIF→WAV extension swap used during conversion
+        dest_ext  = ".wav" if (is_float and ext.lower() in (".aif", ".aiff")) else ext
+        dest_path = os.path.join(dest_dir, f"{base}-{suffix}{dest_ext}")
         if not os.path.exists(dest_path):
             missing_dest.append(rel)
 
