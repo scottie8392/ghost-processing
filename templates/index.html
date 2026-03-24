@@ -360,10 +360,12 @@
     .ll.dim     { color: #555; }
 
     .log-note {
+      flex: 1;
       font-size: 11px;
       color: var(--text-dim);
-      margin-top: 8px;
       text-align: right;
+      line-height: 1.4;
+      padding-left: 12px;
     }
 
     /* ── Completion banner ─────────────────────────────────────── */
@@ -854,6 +856,10 @@
     <div class="btn-row">
       <button class="btn-run" id="btn-run" onclick="startRun()">Run Processing</button>
       <button class="btn-stop" id="btn-stop" onclick="stopRun()" disabled>Stop</button>
+      <div class="log-note" id="log-note">
+        Closing this tab is safe. Keep Terminal open while converting.
+        If interrupted, re-running resumes from where it stopped.
+      </div>
     </div>
 
   </div>
@@ -881,10 +887,6 @@
 
     <div class="log" id="log">
       <div class="log-empty">Output will appear here when processing starts.</div>
-    </div>
-    <div class="log-note" id="log-note">
-      Closing this tab is safe. Keep Terminal open while converting.
-      If interrupted, re-running resumes from where it stopped.
     </div>
   </div>
 
