@@ -156,6 +156,30 @@ def get_sample_rate(file_path):
         return None
 
 
+def get_bit_depth(file_path):
+    """Return the bit depth as an integer using soxi, or None on failure."""
+    try:
+        result = subprocess.run(
+            ["soxi", "-b", file_path], capture_output=True, text=True, check=True
+        )
+        return int(result.stdout.strip())
+    except Exception:
+        return None
+
+
+def output_suffix(target_rate, bit_depth):
+    """Return the combined rate+depth suffix used in dest dir and file names.
+
+    Examples:
+        48000, 24   → "48k-24b"
+        44100, 16   → "44k-16b"
+        96000, "32f" → "96k-32f"
+    """
+    rate_part  = f"{target_rate // 1000}k"
+    depth_part = "32f" if str(bit_depth) == "32f" else f"{bit_depth}b"
+    return f"{rate_part}-{depth_part}"
+
+
 def is_entirely_silent(audio_file, silence_thresh, min_silence_len, min_non_silent_len):
     try:
         audio = AudioSegment.from_file(audio_file)
@@ -264,10 +288,11 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                 )
                 return None
 
-            rel_path = os.path.relpath(file_path, config["source_dir"])
+            rel_path  = os.path.relpath(file_path, config["source_dir"])
             base, ext = os.path.splitext(rel_path)
-            rate_suffix = f"{target_rate // 1000}k"
-            dest_path = os.path.join(dest_dir, f"{base}-{rate_suffix}{ext}")
+            bit_depth = config.get("bit_depth", 24)
+            suffix    = output_suffix(target_rate, bit_depth)
+            dest_path = os.path.join(dest_dir, f"{base}-{suffix}{ext}")
             os.makedirs(os.path.dirname(dest_path), exist_ok=True)
 
             # Skip if previously converted and source hasn't changed
@@ -283,13 +308,18 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                     logging.info(f"Already converted, skipping: {rel_path}")
                     return None
 
-            # Skip if already at target sample rate
+            # Skip if already at target sample rate AND bit depth
             sample_rate = get_sample_rate(file_path)
-            if sample_rate is not None and sample_rate == target_rate:
-                logging.info(f"Already at {target_rate}Hz, skipping: {rel_path}")
+            source_bits = get_bit_depth(file_path)
+            is_float_target = str(bit_depth) == "32f"
+            target_bits_int = 32 if is_float_target else int(bit_depth)
+            already_right_rate  = sample_rate is not None and sample_rate == target_rate
+            already_right_depth = source_bits is not None and source_bits == target_bits_int
+            if already_right_rate and already_right_depth:
+                logging.info(f"Already at {target_rate}Hz/{bit_depth}bit, skipping: {rel_path}")
                 append_log(
                     progress_log,
-                    {rel_path: {"status": "skipped_rate", "reason": f"Already {target_rate}Hz", "timestamp": str(datetime.now())}},
+                    {rel_path: {"status": "skipped_rate", "reason": f"Already {target_rate}Hz/{bit_depth}bit", "timestamp": str(datetime.now())}},
                     is_list=False,
                 )
                 return None
@@ -311,9 +341,6 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
 
             # Silence check passed — log now so the phase bar tracks actual completions
             logging.info(f"Analyzing: {rel_path}")
-
-            # Convert
-            bit_depth = config.get("bit_depth", 24)
             if resample_audio(file_path, dest_path, target_rate, bit_depth, config["dry_run"]):
                 src_hash = file_hash(file_path)
                 append_log(
@@ -402,13 +429,14 @@ def run_verification(config, dest_dir, progress_log, rejects_log):
     unprocessed = source_files - (all_processed | rejected_sources)
 
     target_rate = config.get("target_sample_rate", 48000)
-    rate_suffix = f"{target_rate // 1000}k"
+    bit_depth   = config.get("bit_depth", 24)
+    suffix      = output_suffix(target_rate, bit_depth)
     missing_dest = []
     for rel, data in progress.items():
         if data.get("status") != "converted":
             continue
         base, ext = os.path.splitext(rel)
-        dest_path = os.path.join(dest_dir, f"{base}-{rate_suffix}{ext}")
+        dest_path = os.path.join(dest_dir, f"{base}-{suffix}{ext}")
         if not os.path.exists(dest_path):
             missing_dest.append(rel)
 
@@ -505,8 +533,9 @@ def main():
 
     source_name = os.path.basename(os.path.normpath(config["source_dir"]))
     target_rate = config.get("target_sample_rate", 48000)
-    rate_suffix = f"{target_rate // 1000}k"
-    dest_dir = os.path.join(config["dest_base"], f"{source_name}-{rate_suffix}")
+    bit_depth   = config.get("bit_depth", 24)
+    suffix      = output_suffix(target_rate, bit_depth)
+    dest_dir    = os.path.join(config["dest_base"], f"{source_name}-{suffix}")
     os.makedirs(dest_dir, exist_ok=True)
 
     # Write a copy of this run's log into the dest folder so each conversion

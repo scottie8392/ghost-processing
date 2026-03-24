@@ -56,8 +56,11 @@ def main():
     dest_base = config["dest_base"]
     source_name = os.path.basename(os.path.normpath(source_dir))
     target_rate = config.get("target_sample_rate", 48000)
-    rate_suffix = f"{target_rate // 1000}k"
-    dest_dir = os.path.join(dest_base, f"{source_name}-{rate_suffix}")
+    bit_depth   = config.get("bit_depth", 24)
+    is_float    = str(bit_depth) == "32f"
+    depth_part  = "32f" if is_float else f"{bit_depth}b"
+    suffix      = f"{target_rate // 1000}k-{depth_part}"
+    dest_dir    = os.path.join(dest_base, f"{source_name}-{suffix}")
     progress_log = os.path.join(dest_dir, "progress.json")
     rejects_log = os.path.join(dest_dir, "rejects.json")
 
@@ -96,7 +99,7 @@ def main():
             continue
         rel = os.path.relpath(source_path, source_dir)
         base, ext = os.path.splitext(rel)
-        dest_path = os.path.join(dest_dir, f"{base}-{rate_suffix}{ext}")
+        dest_path = os.path.join(dest_dir, f"{base}-{suffix}{ext}")
         if not os.path.exists(dest_path):
             missing_dest.append(source_path)
         else:

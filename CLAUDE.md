@@ -48,7 +48,7 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - Per-run timestamped log files in `logs/` AND copied into dest folder alongside `progress.json` and `rejects.json`
 - Auto-verification after batch completes
 - `/browse` endpoint blocks sensitive system directories (path traversal protection)
-- Output naming: `{source_name}-{rate_suffix}/` e.g. `Boston-48k/`, files named `stem-48k.wav`
+- Output naming: `{source_name}-{rate}k-{depth}b/` e.g. `Boston-48k-24b/`, files named `stem-48k-24b.wav`
 
 ### Verified by test run:
 - Local mode: WAV + AIF + AIFF, spaces in filenames, already-at-target-rate skip, silence rejection, 44.1kHz/16bit and 48kHz/24bit outputs all correct
@@ -173,7 +173,7 @@ Per file in `process_file()`:
 | `last_job.json` separate from `profile.json` | Profile = settings (stable); last_job = ephemeral state (overwrites each run) |
 | Job name from `os.path.basename(source_dir)` | Natural, automatic, meaningful in notifications |
 | Destination defaults to `dirname(source_dir)` | Most natural workflow — output lands next to input |
-| Output naming `{name}-{rate_suffix}k` | Rate suffix derived from target_sample_rate (e.g. 48000 → 48k) |
+| Output naming `{name}-{rate}k-{depth}b` | Suffix includes both rate and bit depth (e.g. 48000/24 → `48k-24b`, 44100/32f → `44k-32f`) so different conversions never collide and skip logic is unambiguous |
 | Run log copied to dest folder | Each conversion folder is self-contained — open it later, full record is there |
 | `sudo mount_nfs` primary, osascript fallback | sudo is silent and stable; osascript avoids sudo dependency but can show macOS dialogs |
 | Sudoers check via stderr grep | `sudo -n mount_nfs` exit code is unreliable; checking for "password is required" in stderr is accurate |
