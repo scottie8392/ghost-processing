@@ -798,7 +798,7 @@
               <option value="88200">88.2 kHz</option>
               <option value="96000">96 kHz</option>
             </select>
-            <div class="hint">Output sample rate. The source rate is read automatically — files already at this rate are skipped.</div>
+            <div class="hint">Output sample rate. The source rate is read automatically — files already at the target format are copied as-is.</div>
           </div>
           <div class="field">
             <label class="field-label">Bit Depth</label>
@@ -921,7 +921,7 @@
     </div>
 
     <div class="review-section">
-      <div class="review-label">Skipped — already converted or already at target rate</div>
+      <div class="review-label">Skipped — already processed this run</div>
       <div class="review-scroll">
         <ul class="review-list" id="skipped-list">
           <li class="review-empty">None this run</li>
@@ -959,7 +959,7 @@
   const phaseLabel       = document.getElementById('phase-label');
   const phaseFill        = document.getElementById('phase-fill');
   const phaseCount       = document.getElementById('phase-count');
-  let rejectedCount = 0, skippedCount = 0, convertedCount = 0;
+  let rejectedCount = 0, skippedCount = 0, convertedCount = 0, copiedCount = 0;
   let totalFiles = 0, analyzedCount = 0, phaseConverting = false;
 
   function updatePhase() {
@@ -971,7 +971,7 @@
       phaseCount.textContent = analyzedCount + '/' + totalFiles;
     } else {
       phaseLabel.textContent = 'Converting';
-      const done = convertedCount + rejectedCount + skippedCount;
+      const done = convertedCount + copiedCount + rejectedCount + skippedCount;
       const pct  = Math.round((done / totalFiles) * 100);
       phaseFill.style.width = pct + '%';
       phaseCount.textContent = done + '/' + totalFiles;
@@ -1105,7 +1105,7 @@
     logEl.innerHTML = '<div class="log-empty">Output will appear here when processing starts.</div>';
     rejectedList.innerHTML = '<li class="review-empty">None this run</li>';
     skippedList.innerHTML  = '<li class="review-empty">None this run</li>';
-    rejectedCount = 0; skippedCount = 0; convertedCount = 0;
+    rejectedCount = 0; skippedCount = 0; convertedCount = 0; copiedCount = 0;
     totalFiles = 0; analyzedCount = 0; phaseConverting = false;
     badgeRejected.textContent = '0 rejected';
     badgeSkipped.textContent  = '0 skipped';
@@ -1171,14 +1171,16 @@
     const m = msg.toLowerCase();
     if (m.includes('rejecting:') || m.includes('silent file') || m.includes('zero-byte')) {
       addReviewItem(msg, 'rejected');
-    } else if (m.includes('skipping:') || m.includes('already converted') || m.includes('already at')) {
+    } else if (m.includes('skipping:') || m.includes('already processed')) {
       addReviewItem(msg, 'skipped');
+    } else if (m.includes('copied (already at target')) {
+      copiedCount++;
     } else if (m.includes('converted:')) {
       convertedCount++;
     }
   }
 
-  function showCompletion(name, status, converted, rejected, skipped) {
+  function showCompletion(name, status, converted, copied, rejected, skipped) {
     const ok      = status === 'done';
     const stopped = status === 'stopped';
     const bannerClass = ok ? 'done' : (stopped ? 'stopped' : 'error');
@@ -1186,12 +1188,17 @@
     completionIcon.textContent  = ok ? '✓' : (stopped ? '◼' : '✗');
     completionTitle.textContent = (name ? name + ' — ' : '') +
       (ok ? 'Done' : (stopped ? 'Stopped' : 'Finished with errors'));
-    completionStats.innerHTML =
-      `<span class="cs-converted">${converted} converted</span>` +
+    let stats =
+      `<span class="cs-converted">${converted} converted</span>`;
+    if (copied > 0) {
+      stats += `<span class="cs-sep">·</span><span class="cs-copied">${copied} copied</span>`;
+    }
+    stats +=
       `<span class="cs-sep">·</span>` +
       `<span class="cs-rejected">${rejected} silent</span>` +
       `<span class="cs-sep">·</span>` +
       `<span class="cs-skipped">${skipped} skipped</span>`;
+    completionStats.innerHTML = stats;
     completionBanner.classList.remove('hidden');
   }
 
@@ -1204,11 +1211,12 @@
     const when = job.finished_at
       ? new Date(job.finished_at).toLocaleString([], {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})
       : '';
+    const copiedStr = job.copied > 0 ? ` / ${job.copied} copied` : '';
     lastRunChip.innerHTML =
       `Last run: <span class="${cls}">${job.name || 'Job'}</span>` +
       ` — ${label}` +
       (when ? ` · ${when}` : '') +
-      ` · ${job.converted ?? '?'} converted`;
+      ` · ${job.converted ?? '?'} converted${copiedStr}`;
     lastRunChip.classList.remove('hidden');
   }
 
@@ -1269,7 +1277,7 @@
         if (ml.includes('analyzing:')) {
           analyzedCount++;
           updatePhase();
-        } else if (!phaseConverting && (ml.includes('converted:') || ml.includes('silent file') || ml.includes('skipping:') || ml.includes('already at'))) {
+        } else if (!phaseConverting && (ml.includes('converted:') || ml.includes('copied (already at target') || ml.includes('silent file') || ml.includes('skipping:') || ml.includes('already processed'))) {
           phaseConverting = true;
           updatePhase();
         } else if (phaseConverting) {
@@ -1278,6 +1286,7 @@
       } else if (data.type === 'summary') {
         // Server-verified final counts — use these for the completion banner
         convertedCount = data.converted ?? convertedCount;
+        copiedCount    = data.copied    ?? copiedCount;
         rejectedCount  = data.rejected  ?? rejectedCount;
         skippedCount   = data.skipped   ?? skippedCount;
       } else if (data.type === 'done') {
@@ -1287,7 +1296,7 @@
         const stopped   = jobStatus === 'stopped';
         const statusTxt = ok ? 'Done' : (stopped ? 'Stopped' : 'Finished with errors');
         setStatus(ok ? 'done' : (stopped ? 'stopped' : 'error'), statusTxt);
-        showCompletion(data.job_name || '', jobStatus, convertedCount, rejectedCount, skippedCount);
+        showCompletion(data.job_name || '', jobStatus, convertedCount, copiedCount, rejectedCount, skippedCount);
         lastRunChip.classList.add('hidden'); // banner replaces chip while visible
         phaseRow.classList.add('hidden');
         btnRun.disabled = false; btnStop.disabled = true;
@@ -1454,6 +1463,7 @@
 
     // If already mounted for this share, just open the browser
     if (nasMountPoint && nasShareRoot === share) {
+      showNasStatus('connected', 'Connected — ' + nasMountPoint);
       openBrowser('source_dir', 'browser-source', nasMountPoint);
       return;
     }

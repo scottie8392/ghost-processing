@@ -95,7 +95,7 @@ def main():
     hash_mismatches = []
 
     for source_path, data in converted_sources.items():
-        if data.get("status") != "converted":
+        if data.get("status") not in ("converted", "copied"):
             continue
         rel = os.path.relpath(source_path, source_dir)
         base, ext = os.path.splitext(rel)

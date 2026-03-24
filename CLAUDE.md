@@ -35,7 +35,7 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - SSE live log streaming with 500-line ring buffer (reconnects after sleep/tab close)
 - Phase progress bar — "Detecting silence X/N" → "Converting X/N" — accurate, tracks completions
 - Job naming from source directory basename
-- Completion banner (✓/◼/✗, job name, converted/rejected/skipped counts) + "New Run" reset button — distinguishes Done / Stopped / Error
+- Completion banner (✓/◼/✗, job name, converted / copied / rejected / skipped counts) + "New Run" reset button — distinguishes Done / Stopped / Error; "copied" shown only when non-zero
 - `last_job.json` — last job result shown in status bar on fresh page load; status is `"done"` / `"stopped"` / `"error"` (not just pass/fail)
 - macOS Notification Center alert via osascript on completion
 - Process detachment (`start_new_session=True`) — conversion survives Terminal close
@@ -55,8 +55,9 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - All sample rates: 44.1kHz, 48kHz, 88.2kHz, 96kHz — correct output naming and resampling
 - All bit depths: 16-bit, 24-bit, 32-bit, 32f — correct encoding confirmed with soxi
 - 32f with AIF/AIFF source → output as .wav (AIFF can't encode float; fixed)
-- Already-at-target skip fires correctly when both rate AND bit depth match
+- Already-at-target files copied (not skipped) to output; counted separately as "copied" in UI and progress.json
 - Resume from interrupted run — 3 stop/resume cycles confirmed; progress.json correctly gates skips; partial dest files re-converted by design
+- NFS end-to-end — NAS mode, real session folder, 48kHz/24-bit, verification clean
 - `.aif` (single-f) files correctly detected and converted
 - Ableton `.asd` sidecar files correctly ignored
 - Silence detection: truly silent file rejected; sparse/noisy content correctly kept
@@ -64,7 +65,6 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 ### Not yet tested:
 - Deep folder nesting
 - Dry run mode
-- NFS end-to-end conversion run
 - SMB end-to-end conversion run
 - NFS/SMB network drop mid-run
 - Docker end-to-end
@@ -139,7 +139,7 @@ _current_job     = None          # {"name": str, "source": str} set when a job s
 | Type | Payload | Purpose |
 |------|---------|---------|
 | `log` | `{"message": str}` | Log line for output panel + phase bar parsing |
-| `summary` | `{"job_name": str, "converted": N, "rejected": N, "skipped": N}` | Server-verified counts before done |
+| `summary` | `{"job_name": str, "converted": N, "copied": N, "rejected": N, "skipped": N}` | Server-verified counts before done |
 | `done` | `{"returncode": int, "job_name": str, "status": "done"\|"stopped"\|"error"}` | Job finished |
 | `heartbeat` | — | Keep SSE connection alive |
 

@@ -17,6 +17,7 @@ import logging
 import multiprocessing
 import hashlib
 import json
+import shutil
 import signal
 import argparse
 import tempfile
@@ -300,7 +301,7 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
             dest_path = os.path.join(dest_dir, f"{base}-{suffix}{dest_ext}")
             os.makedirs(os.path.dirname(dest_path), exist_ok=True)
 
-            # Skip if previously converted and source hasn't changed
+            # Skip if previously converted or copied and source hasn't changed
             with file_lock:
                 try:
                     progress = (
@@ -308,12 +309,14 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                     )
                 except json.JSONDecodeError:
                     progress = {}
-            if rel_path in progress and progress[rel_path].get("status") == "converted":
+            if rel_path in progress and progress[rel_path].get("status") in ("converted", "copied"):
                 if os.path.exists(dest_path) and file_hash(file_path) == progress[rel_path].get("source_hash"):
-                    logging.info(f"Already converted, skipping: {rel_path}")
+                    logging.info(f"Already processed, skipping: {rel_path}")
                     return None
 
-            # Skip if already at target sample rate AND bit depth
+            # Already at target rate and bit depth — copy to dest so output
+            # folder is complete (all stems present, not just converted ones).
+            # Silent files are still the only ones that get rejected entirely.
             sample_rate = get_sample_rate(file_path)
             source_bits = get_bit_depth(file_path)
             is_float_target = str(bit_depth) == "32f"
@@ -321,13 +324,15 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
             already_right_rate  = sample_rate is not None and sample_rate == target_rate
             already_right_depth = source_bits is not None and source_bits == target_bits_int
             if already_right_rate and already_right_depth:
-                logging.info(f"Already at {target_rate}Hz/{bit_depth}bit, skipping: {rel_path}")
+                shutil.copy2(file_path, dest_path)
+                src_hash = file_hash(file_path)
                 append_log(
                     progress_log,
-                    {rel_path: {"status": "skipped_rate", "reason": f"Already {target_rate}Hz/{bit_depth}bit", "timestamp": str(datetime.now())}},
+                    {rel_path: {"status": "copied", "source_hash": src_hash, "timestamp": str(datetime.now())}},
                     is_list=False,
                 )
-                return None
+                logging.info(f"Copied (already at target format): {rel_path}")
+                return dest_path
 
             # Reject silent files
             if is_entirely_silent(
@@ -429,6 +434,7 @@ def run_verification(config, dest_dir, progress_log, rejects_log):
 
     all_processed   = {os.path.join(config["source_dir"], rel) for rel in progress}
     n_converted     = sum(1 for d in progress.values() if d.get("status") == "converted")
+    n_copied        = sum(1 for d in progress.values() if d.get("status") == "copied")
     n_skipped       = sum(1 for d in progress.values() if d.get("status") == "skipped_rate")
     rejected_sources = set(rejects)
     unprocessed = source_files - (all_processed | rejected_sources)
@@ -439,7 +445,7 @@ def run_verification(config, dest_dir, progress_log, rejects_log):
     suffix      = output_suffix(target_rate, bit_depth)
     missing_dest = []
     for rel, data in progress.items():
-        if data.get("status") != "converted":
+        if data.get("status") not in ("converted", "copied"):
             continue
         base, ext = os.path.splitext(rel)
         # Mirror the 32f AIF→WAV extension swap used during conversion
@@ -449,8 +455,8 @@ def run_verification(config, dest_dir, progress_log, rejects_log):
             missing_dest.append(rel)
 
     logging.info(
-        f"Verification: {n_converted} converted, {n_skipped} skipped, {len(rejected_sources)} rejected, "
-        f"{len(unprocessed)} unprocessed, {len(missing_dest)} missing dest files"
+        f"Verification: {n_converted} converted, {n_copied} copied, {n_skipped} skipped, "
+        f"{len(rejected_sources)} rejected, {len(unprocessed)} unprocessed, {len(missing_dest)} missing dest files"
     )
     for f in sorted(unprocessed):
         logging.warning(f"  Unprocessed: {f}")

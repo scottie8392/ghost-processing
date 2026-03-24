@@ -470,7 +470,7 @@ def run():
 
     def run_process():
         global _active_process, _is_running, _current_job
-        converted = rejected = skipped = 0
+        converted = rejected = skipped = copied = 0
         job_name  = (_current_job or {}).get("name", "Job")
         try:
             python = os.path.join(BASE_DIR, "ghost-processing-venv", "bin", "python")
@@ -491,9 +491,11 @@ def run():
                 ml  = msg.lower()
                 if "converted:" in ml:
                     converted += 1
+                elif "copied (already at target" in ml:
+                    copied += 1
                 elif "rejecting:" in ml or "silent file" in ml or "zero-byte" in ml:
                     rejected += 1
-                elif "skipping:" in ml or "already converted" in ml or "already at" in ml:
+                elif "skipping:" in ml or "already processed" in ml:
                     skipped += 1
                 entry = {"type": "log", "message": msg}
                 _log_ring.append(entry)
@@ -506,8 +508,9 @@ def run():
                 "type": "summary",
                 "job_name": job_name,
                 "converted": converted,
-                "rejected": rejected,
-                "skipped": skipped,
+                "copied":    copied,
+                "rejected":  rejected,
+                "skipped":   skipped,
             }
             _log_ring.append(summary_entry)
             _log_queue.put(summary_entry)
@@ -529,6 +532,7 @@ def run():
                 "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                 "status":      job_status,
                 "converted":   converted,
+                "copied":      copied,
                 "rejected":    rejected,
                 "skipped":     skipped,
                 "returncode":  rc,

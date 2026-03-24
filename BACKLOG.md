@@ -57,12 +57,14 @@ docker-compose up -d
 - [ ] **verify_audio.py after real run** — run the verifier against a completed job and confirm it accounts for all files.
 
 ### NAS (Mac)
-- [ ] **Full NFS conversion run** — connect to NAS → browse → select source → run → verify output files, names, sample rates, and bit depths are correct.
+- [x] **Full NFS conversion run** — confirmed working end-to-end: NAS mode, NFS mount, real session folder, 48kHz/24-bit. Verification passed — all files accounted for.
 - [ ] **Full SMB conversion run** — same as above via SMB protocol.
+- [x] **NAS share chip: error state not cleared on second selection** — after a failed mount (permission denied), clicking a second working share chip left the error message visible even on success. Fixed: the early-return path (already-mounted share) now calls `showNasStatus('connected', ...)` before opening the browser.
 - [ ] **Multiple chips — same NAS, different shares** — confirm clicking chip A, browsing, then clicking chip B mounts and browses the new share independently.
 - [ ] **unRAID appdata NFS mount** — confirm this specific share mounts after re-applying the export in unRAID settings.
 - [ ] **NFS network drop during conversion** — simulate a network interruption mid-run (disable NAS interface or pull switch) and confirm: (a) the app detects the drop and logs it clearly rather than hanging silently, (b) the NFS retry logic (3 attempts + remount) fires correctly, (c) `progress.json` is intact when the network comes back, (d) restarting the job resumes from where it left off without re-converting completed files. Also test: laptop sleep/wake mid-run with NAS mounted.
 - [ ] **SMB network drop during conversion** — same scenario via SMB. SMB has different timeout behaviour than NFS on macOS — confirm it fails fast rather than blocking workers indefinitely.
+- [ ] **SMB stale mount detection and recovery** — macOS SMB mounts can go stale silently after a network drop: the mount point exists but all I/O fails immediately. The app currently has no detection for this. Need to: (1) detect stale mount mid-run (I/O error from SoX that isn't a normal file error), (2) surface a clear "NAS disconnected — remount and re-run to resume" message in the UI rather than a cryptic SoX failure, (3) optionally attempt auto-remount before surfacing the error. NFS is less affected as the kernel stalls and retries; SMB needs explicit handling.
 - [ ] **NAS reboot mid-run** — start a conversion, reboot the NAS, confirm the app surfaces a clear error and the job can be resumed cleanly once the NAS is back.
 
 ### Docker (Synology)
@@ -93,6 +95,8 @@ These cover the gap between "job ran while browser/laptop was closed" and "user 
 - [ ] **Docker / remote: webhook notification on completion** — `osascript` notifications only fire on macOS. In Docker mode (container running on the NAS, browser on another device), there is no push notification at all. Add an optional webhook URL field in settings — on job completion, POST a JSON payload to it. Works with ntfy, Slack incoming webhooks, or any HTTP endpoint. One config field, no dependencies.
 
 ### Workflow
+- [ ] **NAS IP nicknames** — let the user assign a friendly name to each NAS IP (e.g. "192.168.1.20" → "Synology" or "unRAID"). Show the nickname in the IP history dropdown and connection status bar so frequently used servers are immediately recognisable without memorising IPs.
+- [ ] **Source/destination favorites** — let the user star frequently used folder paths (source and destination) and recall them from a dropdown in the respective field. Persisted in `profile.json`. Useful for returning to the same session folder or delivery destination across many jobs.
 - [ ] **Named presets** — save and recall complete configurations as named profiles (e.g. "unRAID 48k/24", "Synology 44.1k/16", "Local Quick"). One click to load a known-good setup for a specific studio context.
 - [ ] **Session queue** — queue multiple source folders to process sequentially. Add a queue panel to the UI with reorder/remove controls. Essential for unattended overnight runs across many sessions.
 - [ ] **Re-process rejected files** — button in the File Review panel to retry rejected files with a temporarily lowered silence threshold. Useful when a stem is very quiet but not actually silent (e.g. room tone, reverb tail).
@@ -173,6 +177,8 @@ These cover the gap between "job ran while browser/laptop was closed" and "user 
 - [x] Log note styled as amber callout box — subtle amber tint + left border accent; moved into btn-row to fill space beside Run/Stop
 - [x] Checkboxes styled as dark-theme pill toggles — amber knob on check, matches dark UI
 - [x] Dry Run moved to its own field with field-label + hint (matches Workers layout); Verbose Logs moved to Advanced → Logging section
+- [x] Already-at-target files copied to output instead of skipped — `shutil.copy2` + `status: "copied"` in `progress.json`; UI shows "N copied" in completion banner and last-run chip when non-zero
+- [x] NAS share chip error cleared on re-select — clicking a working share after a failed one now correctly shows "Connected" status
 
 ---
 
