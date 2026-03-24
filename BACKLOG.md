@@ -69,6 +69,7 @@ docker-compose up -d
 - [ ] **Fix docker-compose.yml before testing** — two gaps must be resolved first: (1) add a dest volume so converted files aren't lost on rebuild; (2) mount `config.docker.yaml` so paths can be configured without rebuilding the image. See 🟢 Infrastructure items.
 - [ ] **Docker end-to-end** — `docker compose up`, access UI from another device on the network, run a conversion, confirm output appears on the NAS volume and persists after container restart.
 - [ ] **Watch mode end-to-end** — drop a new file into a watched folder and confirm it gets picked up and converted. Confirm `stability_wait_sec` prevents processing files still being written.
+- [ ] **Watch mode: Pro Tools bounce race condition** — Pro Tools writes bounce files incrementally; the file appears on disk immediately but grows as the export progresses. The watcher must not pick up a file until Pro Tools has finished writing it. Current `stability_wait_sec` setting is the guard, but it needs to be validated against real Pro Tools bounces — the stability window must be longer than the longest expected write time for a large session. Also consider: watch for file size stability (no growth for N seconds) rather than just a fixed delay after creation.
 
 ---
 

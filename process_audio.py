@@ -395,9 +395,11 @@ def run_verification(config, dest_dir, progress_log, rejects_log):
     except json.JSONDecodeError:
         rejects = []
 
-    converted_sources = {os.path.join(config["source_dir"], rel) for rel in progress}
+    all_processed   = {os.path.join(config["source_dir"], rel) for rel in progress}
+    n_converted     = sum(1 for d in progress.values() if d.get("status") == "converted")
+    n_skipped       = sum(1 for d in progress.values() if d.get("status") == "skipped_rate")
     rejected_sources = set(rejects)
-    unprocessed = source_files - (converted_sources | rejected_sources)
+    unprocessed = source_files - (all_processed | rejected_sources)
 
     target_rate = config.get("target_sample_rate", 48000)
     rate_suffix = f"{target_rate // 1000}k"
@@ -411,7 +413,7 @@ def run_verification(config, dest_dir, progress_log, rejects_log):
             missing_dest.append(rel)
 
     logging.info(
-        f"Verification: {len(converted_sources)} converted, {len(rejected_sources)} rejected, "
+        f"Verification: {n_converted} converted, {n_skipped} skipped, {len(rejected_sources)} rejected, "
         f"{len(unprocessed)} unprocessed, {len(missing_dest)} missing dest files"
     )
     for f in sorted(unprocessed):
