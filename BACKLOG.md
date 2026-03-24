@@ -46,8 +46,8 @@ docker-compose up -d
 
 ### Core conversion
 - [x] **Local mode conversion run** — confirmed working; 44.1kHz/16-bit test run completed on `/Users/scottie/Desktop/TR Test Show`.
-- [ ] **All sample rate outputs** — 44.1kHz confirmed ✓. Still need: 48kHz, 88.2kHz, 96kHz. Confirm files are correctly resampled and named (e.g. `stem-48k.wav`, `stem-88k.wav`).
-- [ ] **All bit depth outputs** — 16-bit confirmed ✓. Still need: 24-bit, 32-bit, 32f (float). Confirm SoX command is correct for each and output files are valid.
+- [x] **All sample rate outputs** — 44.1kHz ✓, 48kHz ✓, 88.2kHz ✓, 96kHz ✓. All correctly resampled and named with rate+depth suffix (e.g. `stem-48k-24b.wav`).
+- [x] **All bit depth outputs** — 16-bit ✓, 24-bit ✓, 32-bit ✓, 32f ✓. Note: 32f with .aif/.aiff sources outputs as .wav (AIFF can't encode float — SoX warns and silently falls back to 32i; fixed by forcing .wav output for float).
 - [ ] **Silence detection calibration** — run against a known set of stems including intentionally silent tracks and sparse/SFX stems. Confirm correct rejection at default threshold (-50dB / 200ms). Use the analyzer (see 🟢 UI) to dial in settings first.
 - [x] **AIFF source files** — `.aif` extension detection fixed in `process_audio.py` and `verify_audio.py`; confirmed `.aif` files detected during test run.
 - [x] **Files with spaces and special characters in names** — confirmed working; test run used `/Users/scottie/Desktop/TR Test Show` (space in path) without issues.

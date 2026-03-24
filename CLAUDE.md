@@ -51,7 +51,11 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - Output naming: `{source_name}-{rate}k-{depth}b/` e.g. `Boston-48k-24b/`, files named `stem-48k-24b.wav`
 
 ### Verified by test run:
-- Local mode: WAV + AIF + AIFF, spaces in filenames, already-at-target-rate skip, silence rejection, 44.1kHz/16bit and 48kHz/24bit outputs all correct
+- Local mode: WAV + AIF + AIFF, spaces in filenames, already-at-target-rate skip, silence rejection
+- All sample rates: 44.1kHz, 48kHz, 88.2kHz, 96kHz — correct output naming and resampling
+- All bit depths: 16-bit, 24-bit, 32-bit, 32f — correct encoding confirmed with soxi
+- 32f with AIF/AIFF source → output as .wav (AIFF can't encode float; fixed)
+- Already-at-target skip fires correctly when both rate AND bit depth match
 - `.aif` (single-f) files correctly detected and converted
 - Ableton `.asd` sidecar files correctly ignored
 - Silence detection: truly silent file rejected; sparse/noisy content correctly kept
