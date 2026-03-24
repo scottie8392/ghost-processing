@@ -18,7 +18,7 @@ A personal audio processing pipeline for a music studio. Converts stems (WAV/AIF
 
 ---
 
-## Current State (as of 2026-03-23)
+## Current State (as of 2026-03-24)
 
 The app is **feature-complete and working**. Core pipeline verified by real test runs. All known code bugs fixed. Remote configured at `origin/main`.
 
@@ -35,7 +35,10 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - SSE live log streaming with 500-line ring buffer (reconnects after sleep/tab close)
 - Phase progress bar — "Detecting silence X/N" → "Converting X/N" — accurate, tracks completions
 - Job naming from source directory basename
-- Completion banner (✓/◼/✗, job name, converted / copied / rejected / skipped counts) + "New Run" reset button — distinguishes Done / Stopped / Error; "copied" shown only when non-zero
+- Completion banner (✓/◼/✗, converted / copied / rejected / skipped counts) — distinguishes Done / Stopped / Error; "copied" shown only when non-zero
+- Dry run mode — amber banner with ◎ icon; no files, dirs, or logs written; report-only; never persisted to profile.json
+- Log display — Python timestamp prefix stripped; colour-coded (success/warn/error/dim/meta/dry-run); format info per file e.g. `Checking: stem.aif (96k/24b)`
+- File Review panel — live-updating lists of rejected (silent) and skipped (already in dest) files with counts
 - `last_job.json` — last job result shown in status bar on fresh page load; status is `"done"` / `"stopped"` / `"error"` (not just pass/fail)
 - macOS Notification Center alert via osascript on completion
 - Process detachment (`start_new_session=True`) — conversion survives Terminal close
@@ -51,20 +54,20 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - Output naming: `{source_name}-{rate}k-{depth}b/` e.g. `Boston-48k-24b/`, files named `stem-48k-24b.wav`
 
 ### Verified by test run:
-- Local mode: WAV + AIF + AIFF, spaces in filenames, already-at-target-rate skip, silence rejection
+- Local mode: WAV + AIF + AIFF, spaces in filenames, silence rejection, resume, deep folder nesting
 - All sample rates: 44.1kHz, 48kHz, 88.2kHz, 96kHz — correct output naming and resampling
 - All bit depths: 16-bit, 24-bit, 32-bit, 32f — correct encoding confirmed with soxi
 - 32f with AIF/AIFF source → output as .wav (AIFF can't encode float; fixed)
 - Already-at-target files copied (not skipped) to output; counted separately as "copied" in UI and progress.json
+- Already-processed files skipped (not counted as silent) — correctly shown as "N skipped" in banner and File Review
 - Resume from interrupted run — 3 stop/resume cycles confirmed; progress.json correctly gates skips; partial dest files re-converted by design
 - NFS end-to-end — NAS mode, real session folder, 48kHz/24-bit, verification clean
 - `.aif` (single-f) files correctly detected and converted
 - Ableton `.asd` sidecar files correctly ignored
 - Silence detection: truly silent file rejected; sparse/noisy content correctly kept
+- Dry run mode: no files written, all counts correct, amber banner
 
 ### Not yet tested:
-- Deep folder nesting
-- Dry run mode
 - SMB end-to-end conversion run
 - NFS/SMB network drop mid-run
 - Docker end-to-end
@@ -75,7 +78,7 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 ## Immediate Next Steps (in order)
 
 ### 1. Remaining test checklist
-See BACKLOG.md 🟡 section. Priority: 88.2/96kHz outputs, 32bit/32f outputs, then NFS real run.
+See BACKLOG.md 🟡 section. Priority: SMB end-to-end, then Docker.
 
 ### 2. Remaining 🔴 bugs
 - **BWF metadata stripped by SoX** — BEXT chunks (timecode, originator) not preserved. Fix: `bwfmetaedit` post-step.
@@ -151,14 +154,18 @@ _current_job     = None          # {"name": str, "source": str} set when a job s
 
 ### Conversion pipeline (process_audio.py)
 Per file in `process_file()`:
-1. Zero-byte check — reject immediately
-2. Resume check — skip if in `progress.json` with matching source MD5 hash and dest file exists
-3. `soxi -r` — skip if already at target sample rate
-4. pydub silence detection — reject if entirely silent
-5. Log `"Analyzing: {rel_path}"` — signals silence check passed; drives phase bar in UI
+1. Zero-byte check — reject immediately (return None)
+2. Resume check — if in `progress.json` with matching source MD5 hash and dest file exists → return `"skipped"`
+3. `soxi -r` + `soxi -b` — log `"Checking: {rel_path}  ({src_fmt})"`, then copy if already at target rate+depth (return `"copied"`)
+4. pydub silence detection — reject if entirely silent (return None)
+5. Log `"Analyzing: {rel_path}"` (real run only) — signals silence check passed; drives phase bar in UI
 6. SoX subprocess: `sox input [-b N] [-e floating-point] output rate -v SR [dither -s]`
-7. Atomic write to `progress.json` on success
+7. Atomic write to `progress.json` on success; return file path (truthy → converted)
 8. Auto-verification at end of batch; run log also written to dest folder
+
+`batch_process()` counts returns: `"copied"` → copied, `"skipped"` → skipped, truthy path → converted, None → rejected. Emits `"Done: N converted[, N copied][, N silent][, N skipped] in Xs"` — this line is parsed by app.py as the authoritative count for the SSE summary event and completion banner.
+
+**No tqdm** — was removed because tqdm's `\r` progress bar writes to stderr (merged into stdout pipe) were corrupting parallel worker log lines via Python's universal-newlines `\r`-as-newline handling. UI has its own phase bar.
 
 ---
 
@@ -186,6 +193,10 @@ Per file in `process_file()`:
 | `output_suffix(rate, depth)` helper | Dest dirs and filenames include both rate and depth e.g. `48k-24b`; prevents collisions across bit depths and makes skip logic unambiguous |
 | 32f AIF/AIFF → .wav output | AIFF can't encode float; SoX silently falls back to 32i. Force .wav for 32f+AIF sources. Same ext swap mirrored in both verifiers. |
 | Checkboxes as pill toggles | All `input[type="checkbox"]` styled as dark-surface pill toggles with amber knob — default white checkbox breaks dark theme |
+| No tqdm in batch_process | tqdm's `\r` updates (written to stderr, merged into stdout pipe) were corrupting parallel worker log lines via Python universal-newlines `\r`-as-newline. UI has its own phase bar. |
+| "Done:" line as authoritative count | app.py incremental line-parse counts can be wrong when parallel workers write simultaneously. `process_audio.py` batch_process counts from return values and emits a final "Done:" summary — app.py parses this as the definitive numbers for the banner. |
+| `process_file` returns "skipped" string | Distinct from None (rejected) so batch_process can count skipped files separately. Previously both returned None → skipped files inflated the silent count. |
+| Dry run writes nothing | No dest dir, no log files, no progress/rejects JSON. Output is UI-only. dry_run flag never persisted to profile.json — it's a one-off mode. |
 
 ---
 
@@ -213,5 +224,4 @@ python verify_audio.py --config config.local.yaml
 
 - Branch: `main`
 - Remote: `origin/main` configured
-- Working tree: clean
-- All known bugs fixed and committed as of 2026-03-23
+- Working tree: uncommitted changes from 2026-03-24 session (tqdm removal, skipped count fix, dry run overhaul, log formatting, Done: line parsing, doc updates)

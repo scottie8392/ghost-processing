@@ -25,7 +25,7 @@ import subprocess
 from datetime import datetime
 from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError
 
-from tqdm import tqdm
+
 import psutil
 import yaml
 from pydub import AudioSegment, silence
@@ -47,23 +47,25 @@ def ignore_sigint():
 # Setup
 # ---------------------------------------------------------------------------
 
-def setup_logging(log_dir, verbose=False):
-    os.makedirs(log_dir, exist_ok=True)
+def setup_logging(log_dir, verbose=False, dry_run=False):
     run_ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    run_log = os.path.join(log_dir, f"run_{run_ts}.log")
-    main_log = os.path.join(log_dir, "process_audio.log")
     level = logging.DEBUG if verbose else logging.INFO
     fmt = logging.Formatter("%(asctime)s %(levelname)s: %(message)s")
     logger = logging.getLogger()
     logger.setLevel(level)
-    for handler in [
-        logging.FileHandler(main_log),
-        logging.FileHandler(run_log),
-        logging.StreamHandler(),
-    ]:
+    handlers = [logging.StreamHandler()]
+    if not dry_run:
+        os.makedirs(log_dir, exist_ok=True)
+        run_log = os.path.join(log_dir, f"run_{run_ts}.log")
+        main_log = os.path.join(log_dir, "process_audio.log")
+        handlers += [logging.FileHandler(main_log), logging.FileHandler(run_log)]
+    else:
+        run_log = None
+    for handler in handlers:
         handler.setFormatter(fmt)
         logger.addHandler(handler)
-    logging.info(f"Run log: {run_log}")
+    if run_log:
+        logging.info(f"Run log: {run_log}")
     return run_log, run_ts
 
 
@@ -168,6 +170,21 @@ def get_bit_depth(file_path):
         return None
 
 
+def fmt_rate(rate):
+    """Format a sample rate for display: 44100 → '44.1k', 48000 → '48k'."""
+    if rate is None:
+        return "?k"
+    k = rate / 1000
+    return f"{k:g}k"
+
+
+def fmt_depth(depth):
+    """Format bit depth for display: 24 → '24b', '32f' → '32f'."""
+    if depth is None:
+        return "?b"
+    return "32f" if str(depth) == "32f" else f"{depth}b"
+
+
 def output_suffix(target_rate, bit_depth):
     """Return the combined rate+depth suffix used in dest dir and file names.
 
@@ -198,7 +215,6 @@ def is_entirely_silent(audio_file, silence_thresh, min_silence_len, min_non_sile
 
 def resample_audio(audio_file, dest_file, target_rate, bit_depth, dry_run):
     if dry_run:
-        logging.info(f"[DRY RUN] Would resample {audio_file} → {dest_file}")
         return True
     try:
         is_float = str(bit_depth) == "32f"
@@ -277,19 +293,19 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
 
     target_rate = config.get("target_sample_rate", 48000)
 
+    rel_path = os.path.relpath(file_path, config["source_dir"])
+
     for attempt in range(3):
         try:
             # Reject zero-byte files immediately
             if os.path.getsize(file_path) == 0:
-                logging.warning(f"Zero-byte file, rejecting: {file_path}")
+                logging.warning(f"Rejected: {rel_path}  (zero-byte)")
                 append_log(
                     rejects_log,
                     {"path": file_path, "reason": "Zero-byte file", "timestamp": str(datetime.now())},
                     is_list=True,
                 )
                 return None
-
-            rel_path  = os.path.relpath(file_path, config["source_dir"])
             base, ext = os.path.splitext(rel_path)
             bit_depth = config.get("bit_depth", 24)
             suffix    = output_suffix(target_rate, bit_depth)
@@ -299,7 +315,8 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
             is_float = str(bit_depth) == "32f"
             dest_ext  = ".wav" if (is_float and ext.lower() in (".aif", ".aiff")) else ext
             dest_path = os.path.join(dest_dir, f"{base}-{suffix}{dest_ext}")
-            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            if not config.get("dry_run"):
+                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
 
             # Skip if previously converted or copied and source hasn't changed
             with file_lock:
@@ -312,7 +329,7 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
             if rel_path in progress and progress[rel_path].get("status") in ("converted", "copied"):
                 if os.path.exists(dest_path) and file_hash(file_path) == progress[rel_path].get("source_hash"):
                     logging.info(f"Already processed, skipping: {rel_path}")
-                    return None
+                    return "skipped"
 
             # Already at target rate and bit depth — copy to dest so output
             # folder is complete (all stems present, not just converted ones).
@@ -323,7 +340,14 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
             target_bits_int = 32 if is_float_target else int(bit_depth)
             already_right_rate  = sample_rate is not None and sample_rate == target_rate
             already_right_depth = source_bits is not None and source_bits == target_bits_int
+            src_fmt  = f"{fmt_rate(sample_rate)}/{fmt_depth(source_bits)}"
+            dest_fmt = f"{fmt_rate(target_rate)}/{fmt_depth(bit_depth)}"
+            logging.info(f"Checking: {rel_path}  ({src_fmt})")
+
             if already_right_rate and already_right_depth:
+                if config["dry_run"]:
+                    logging.info(f"[DRY RUN] Would copy: {rel_path}  ({src_fmt}, already at target)")
+                    return "copied"
                 shutil.copy2(file_path, dest_path)
                 src_hash = file_hash(file_path)
                 append_log(
@@ -331,39 +355,47 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                     {rel_path: {"status": "copied", "source_hash": src_hash, "timestamp": str(datetime.now())}},
                     is_list=False,
                 )
-                logging.info(f"Copied (already at target format): {rel_path}")
-                return dest_path
+                logging.info(f"Copied: {rel_path}  ({src_fmt}, already at target)")
+                return "copied"
 
-            # Reject silent files
             if is_entirely_silent(
                 file_path,
                 config["silence_thresh"],
                 config["min_silence_len"],
                 config["min_non_silent_len"],
             ):
-                logging.info(f"Silent file, rejecting: {rel_path}")
-                append_log(
-                    rejects_log,
-                    {"path": file_path, "reason": "Entirely silent", "timestamp": str(datetime.now())},
-                    is_list=True,
-                )
+                logging.info(f"Rejected: {rel_path}  (silent)")
+                if not config.get("dry_run"):
+                    append_log(
+                        rejects_log,
+                        {"path": file_path, "reason": "Entirely silent", "timestamp": str(datetime.now())},
+                        is_list=True,
+                    )
                 return None
 
             # Silence check passed — log now so the phase bar tracks actual completions
-            logging.info(f"Analyzing: {rel_path}")
+            if not config.get("dry_run"):
+                logging.info(f"Analyzing: {rel_path}")
             if resample_audio(file_path, dest_path, target_rate, bit_depth, config["dry_run"]):
-                src_hash = file_hash(file_path)
-                append_log(
-                    progress_log,
-                    {rel_path: {"status": "converted", "source_hash": src_hash, "timestamp": str(datetime.now())}},
-                    is_list=False,
-                )
-                logging.info(f"Converted: {rel_path}")
+                if not config["dry_run"]:
+                    src_hash = file_hash(file_path)
+                    append_log(
+                        progress_log,
+                        {rel_path: {"status": "converted", "source_hash": src_hash, "timestamp": str(datetime.now())}},
+                        is_list=False,
+                    )
+                if config["dry_run"]:
+                    logging.info(f"[DRY RUN] Would convert: {rel_path}  ({src_fmt} → {dest_fmt})")
+                else:
+                    logging.info(f"Converted: {rel_path}  ({src_fmt} → {dest_fmt})")
                 return file_path
             return None
 
         except OSError as e:
-            if e.errno in (2, 57):  # ENOENT or socket not connected
+            # Only retry on network-related errors affecting the source file itself.
+            # ENOENT (2) on a different path (e.g. missing dest dir) is a real bug, not a network drop.
+            is_network_enoent = e.errno == 2 and (e.filename is None or str(e.filename) == file_path)
+            if is_network_enoent or e.errno == 57:  # ENOENT on source, or socket not connected
                 logging.warning(f"Network error on {file_path} (attempt {attempt + 1}/3): {e}")
                 if config.get("enable_script_remount"):
                     remount_network(config)
@@ -378,7 +410,7 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
 
 
 def batch_process(files, config, rejects_log, progress_log, dest_dir):
-    converted = []
+    converted = copied = rejected = skipped = 0
     executor = None
     try:
         executor = ProcessPoolExecutor(
@@ -388,23 +420,31 @@ def batch_process(files, config, rejects_log, progress_log, dest_dir):
             executor.submit(process_file, f, config, rejects_log, progress_log, dest_dir): f
             for f in files
         }
-        for future in tqdm(as_completed(futures), total=len(futures), desc="Processing"):
+        for future in as_completed(futures):
             if shutdown_event.is_set():
                 logging.info("Shutdown signaled — stopping queue")
                 break
             try:
                 result = future.result(timeout=300)
-                if result:
-                    converted.append(result)
+                if result == "copied":
+                    copied += 1
+                elif result == "skipped":
+                    skipped += 1
+                elif result:
+                    converted += 1
+                else:
+                    rejected += 1
             except TimeoutError:
                 logging.error(f"Timeout: {futures[future]}")
                 future.cancel()
+                rejected += 1
             except Exception as e:
                 logging.error(f"Error on {futures[future]}: {e}")
+                rejected += 1
     finally:
         if executor:
             executor.shutdown(wait=True, cancel_futures=True)
-    return len(converted), len(files) - len(converted)
+    return converted, copied, rejected, skipped
 
 
 # ---------------------------------------------------------------------------
@@ -542,7 +582,7 @@ def main():
     args = parser.parse_args()
 
     config = load_config(args.config)
-    _, run_ts = setup_logging(config["log_dir"], config.get("verbose", False))
+    _, run_ts = setup_logging(config["log_dir"], config.get("verbose", False), config.get("dry_run", False))
     signal.signal(signal.SIGINT, signal_handler)
 
     source_name = os.path.basename(os.path.normpath(config["source_dir"]))
@@ -550,14 +590,16 @@ def main():
     bit_depth   = config.get("bit_depth", 24)
     suffix      = output_suffix(target_rate, bit_depth)
     dest_dir    = os.path.join(config["dest_base"], f"{source_name}-{suffix}")
-    os.makedirs(dest_dir, exist_ok=True)
+    dry_run     = config.get("dry_run", False)
 
-    # Write a copy of this run's log into the dest folder so each conversion
-    # folder is self-contained — open it later and the full record is right there.
-    dest_log = os.path.join(dest_dir, f"run_{run_ts}.log")
-    dest_handler = logging.FileHandler(dest_log)
-    dest_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
-    logging.getLogger().addHandler(dest_handler)
+    if not dry_run:
+        os.makedirs(dest_dir, exist_ok=True)
+        # Write a copy of this run's log into the dest folder so each conversion
+        # folder is self-contained — open it later and the full record is right there.
+        dest_log = os.path.join(dest_dir, f"run_{run_ts}.log")
+        dest_handler = logging.FileHandler(dest_log)
+        dest_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
+        logging.getLogger().addHandler(dest_handler)
 
     rejects_log = os.path.join(dest_dir, "rejects.json")
     progress_log = os.path.join(dest_dir, "progress.json")
@@ -579,25 +621,31 @@ def main():
             observer.stop()
             observer.join()
     else:
-        logging.info(f"Batch mode — source: {config['source_dir']}")
+        logging.info(f"Session: {source_name}  →  {suffix}")
         files = collect_files(config["source_dir"])
         logging.info(f"Found {len(files)} audio files")
         try:
-            converted, skipped = batch_process(files, config, rejects_log, progress_log, dest_dir)
+            converted, copied, rejected, skipped = batch_process(files, config, rejects_log, progress_log, dest_dir)
             elapsed = time.time() - start_time
-            summary = f"Done: {converted} converted, {skipped} skipped/rejected in {elapsed:.1f}s"
+            parts = [f"{converted} converted"]
+            if copied:   parts.append(f"{copied} copied")
+            if rejected: parts.append(f"{rejected} silent")
+            if skipped:  parts.append(f"{skipped} skipped")
+            summary = f"Done: {', '.join(parts)} in {elapsed:.1f}s"
             logging.info(summary)
-            print(f"\n{summary}")
         except KeyboardInterrupt:
             shutdown_event.set()
 
-        # Auto-verification after batch
-        unprocessed, missing = run_verification(config, dest_dir, progress_log, rejects_log)
-        if unprocessed > 0 or missing > 0:
-            print(f"WARNING: {unprocessed} unprocessed, {missing} missing dest files.")
-            print("Run verify_audio.py for a full report.")
+        # Auto-verification after batch (skipped in dry run — nothing was written)
+        if config.get("dry_run"):
+            logging.info("Dry run complete — no files written.")
         else:
-            print("Verification passed — all files accounted for.")
+            unprocessed, missing = run_verification(config, dest_dir, progress_log, rejects_log)
+            if unprocessed > 0 or missing > 0:
+                print(f"WARNING: {unprocessed} unprocessed, {missing} missing dest files.")
+                print("Run verify_audio.py for a full report.")
+            else:
+                print("Verification passed — all files accounted for.")
 
 
 if __name__ == "__main__":

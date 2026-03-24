@@ -307,6 +307,7 @@
     .dot.done    { background: var(--success); }
     .dot.error   { background: var(--error); }
     .dot.stopped { background: var(--muted); }
+    .dot.dry-run { background: var(--accent); }
 
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.2} }
 
@@ -369,11 +370,13 @@
       padding-top: 180px;
       font-style: italic;
     }
-    .ll         { padding: 1px 0; word-break: break-all; }
-    .ll.error   { color: var(--error); }
-    .ll.warn    { color: var(--warn); }
-    .ll.success { color: var(--success); }
-    .ll.dim     { color: #555; }
+    .ll          { padding: 1px 0; word-break: break-all; }
+    .ll.error    { color: var(--error); }
+    .ll.warn     { color: var(--warn); }
+    .ll.success  { color: var(--success); }
+    .ll.dim      { color: #555; }
+    .ll.dry-run  { color: var(--accent); opacity: 0.85; }
+    .ll.meta     { color: #555; font-style: italic; }
 
     .log-note {
       flex: 1;
@@ -400,9 +403,10 @@
       margin-bottom: 14px;
       text-align: center;
     }
-    .completion-banner.done    { background: rgba(80,200,120,0.07);  border: 1px solid rgba(80,200,120,0.2); }
-    .completion-banner.error   { background: rgba(200,80,80,0.07);   border: 1px solid rgba(200,80,80,0.2); }
-    .completion-banner.stopped { background: rgba(140,140,140,0.07); border: 1px solid rgba(140,140,140,0.2); }
+    .completion-banner.done     { background: rgba(80,200,120,0.07);  border: 1px solid rgba(80,200,120,0.2); }
+    .completion-banner.error    { background: rgba(200,80,80,0.07);   border: 1px solid rgba(200,80,80,0.2); }
+    .completion-banner.stopped  { background: rgba(140,140,140,0.07); border: 1px solid rgba(140,140,140,0.2); }
+    .completion-banner.dry-run  { background: rgba(240,160,48,0.07);  border: 1px solid rgba(240,160,48,0.2); }
     .completion-icon {
       font-size: 36px;
       line-height: 1;
@@ -894,7 +898,6 @@
       <div class="completion-icon" id="completion-icon"></div>
       <div class="completion-title" id="completion-title"></div>
       <div class="completion-stats" id="completion-stats"></div>
-      <button class="btn-new-run" onclick="resetUI()">New Run</button>
     </div>
 
     <div class="log" id="log">
@@ -921,7 +924,7 @@
     </div>
 
     <div class="review-section">
-      <div class="review-label">Skipped — already processed this run</div>
+      <div class="review-label">Skipped — already exist in destination</div>
       <div class="review-scroll">
         <ul class="review-list" id="skipped-list">
           <li class="review-empty">None this run</li>
@@ -1129,22 +1132,34 @@
     statusLbl.textContent = text;
   }
 
+  // Strip Python logging timestamp+level prefix: "2026-03-23 22:44:44,038 INFO: "
+  const _logPrefixRe = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+ \w+:\s*/;
+  // Match tqdm progress bar noise: "Processing: 0%| | 0/4 ..."
+  const _tqdmRe = /^Processing:\s+\d+%/;
+
   function addLine(text, cls) {
+    // Filter tqdm progress bars — they don't render cleanly as text
+    if (_tqdmRe.test(text)) return;
     const empty = logEl.querySelector('.log-empty');
     if (empty) empty.remove();
     const d = document.createElement('div');
     d.className = 'll' + (cls ? ' ' + cls : '');
-    d.textContent = text;
+    d.textContent = text;  // already stripped by caller
     logEl.appendChild(d);
     if (autoScroll) logEl.scrollTop = logEl.scrollHeight;
   }
 
   function classify(msg) {
     const m = msg.toLowerCase();
-    if (m.includes('error') || m.includes('failed'))       return 'error';
-    if (m.includes('warning') || m.includes('warn'))       return 'warn';
-    if (m.includes('converted:') || m.includes('passed'))  return 'success';
-    if (m.includes('skip') || m.includes('already at'))    return 'dim';
+    if (m.includes('[dry run]'))                             return 'dry-run';
+    if (m.includes('error') || m.includes('failed'))        return 'error';
+    if (m.includes('warning') || m.includes('warn'))        return 'warn';
+    if (m.startsWith('converted:') || m.includes('passed')) return 'success';
+    if (m.startsWith('copied:'))                             return 'success';
+    if (m.startsWith('rejected:'))                           return 'warn';
+    if (m.startsWith('checking:') || m.startsWith('analyzing:')) return 'dim';
+    if (m.includes('skip') || m.includes('already processed')) return 'dim';
+    if (m.startsWith('session:') || m.startsWith('found ') || m.startsWith('done:') || m.startsWith('run log:') || m.includes('dry run complete') || m.includes('verification') || m.includes('post-run')) return 'meta';
     return '';
   }
 
@@ -1169,25 +1184,25 @@
 
   function checkReviewLine(msg) {
     const m = msg.toLowerCase();
-    if (m.includes('rejecting:') || m.includes('silent file') || m.includes('zero-byte')) {
+    if (m.startsWith('rejected:') || m.includes('rejecting:') || m.includes('silent file') || m.includes('zero-byte')) {
       addReviewItem(msg, 'rejected');
     } else if (m.includes('skipping:') || m.includes('already processed')) {
       addReviewItem(msg, 'skipped');
-    } else if (m.includes('copied (already at target')) {
+    } else if (m.includes('copied (already at target') || m.includes('[dry run] would copy')) {
       copiedCount++;
-    } else if (m.includes('converted:')) {
+    } else if (m.includes('converted:') || m.includes('[dry run] would convert:')) {
       convertedCount++;
     }
   }
 
-  function showCompletion(name, status, converted, copied, rejected, skipped) {
+  function showCompletion(name, status, converted, copied, rejected, skipped, isDryRun) {
     const ok      = status === 'done';
     const stopped = status === 'stopped';
-    const bannerClass = ok ? 'done' : (stopped ? 'stopped' : 'error');
+    const bannerClass = isDryRun ? 'dry-run' : (ok ? 'done' : (stopped ? 'stopped' : 'error'));
     completionBanner.className = 'completion-banner ' + bannerClass;
-    completionIcon.textContent  = ok ? '✓' : (stopped ? '◼' : '✗');
-    completionTitle.textContent = (name ? name + ' — ' : '') +
-      (ok ? 'Done' : (stopped ? 'Stopped' : 'Finished with errors'));
+    completionIcon.textContent  = isDryRun ? '◎' : (ok ? '✓' : (stopped ? '◼' : '✗'));
+    const baseLabel = ok ? 'Done' : (stopped ? 'Stopped' : 'Finished with errors');
+    completionTitle.textContent = isDryRun ? 'Dry Run' : baseLabel;
     let stats =
       `<span class="cs-converted">${converted} converted</span>`;
     if (copied > 0) {
@@ -1266,18 +1281,19 @@
     es.onmessage = (e) => {
       const data = JSON.parse(e.data);
       if (data.type === 'log') {
-        addLine(data.message, classify(data.message));
-        checkReviewLine(data.message);
+        const cleanMsg = data.message.replace(_logPrefixRe, '');
+        addLine(cleanMsg, classify(cleanMsg));
+        checkReviewLine(cleanMsg);
         // Phase tracking
-        const ml = data.message.toLowerCase();
+        const ml = cleanMsg.toLowerCase();
         if (!totalFiles) {
           const m = ml.match(/found (\d+) audio files/);
           if (m) { totalFiles = parseInt(m[1]); phaseRow.classList.remove('hidden'); }
         }
-        if (ml.includes('analyzing:')) {
+        if (ml.startsWith('analyzing:')) {
           analyzedCount++;
           updatePhase();
-        } else if (!phaseConverting && (ml.includes('converted:') || ml.includes('copied (already at target') || ml.includes('silent file') || ml.includes('skipping:') || ml.includes('already processed'))) {
+        } else if (!phaseConverting && (ml.startsWith('converted:') || ml.includes('[dry run] would convert:') || ml.startsWith('copied:') || ml.includes('[dry run] would copy:') || ml.startsWith('rejected:') || ml.includes('skipping:') || ml.includes('already processed'))) {
           phaseConverting = true;
           updatePhase();
         } else if (phaseConverting) {
@@ -1291,12 +1307,15 @@
         skippedCount   = data.skipped   ?? skippedCount;
       } else if (data.type === 'done') {
         _streamDone = true;
+        const isDryRun  = !!data.dry_run;
         const jobStatus = data.status || (data.returncode === 0 ? 'done' : 'error');
         const ok        = jobStatus === 'done';
         const stopped   = jobStatus === 'stopped';
-        const statusTxt = ok ? 'Done' : (stopped ? 'Stopped' : 'Finished with errors');
-        setStatus(ok ? 'done' : (stopped ? 'stopped' : 'error'), statusTxt);
-        showCompletion(data.job_name || '', jobStatus, convertedCount, copiedCount, rejectedCount, skippedCount);
+        const baseLabel = ok ? 'Done' : (stopped ? 'Stopped' : 'Finished with errors');
+        const statusTxt = isDryRun ? 'Dry Run' : baseLabel;
+        const dotState  = isDryRun ? 'dry-run' : (ok ? 'done' : (stopped ? 'stopped' : 'error'));
+        setStatus(dotState, statusTxt);
+        showCompletion(data.job_name || '', jobStatus, convertedCount, copiedCount, rejectedCount, skippedCount, isDryRun);
         lastRunChip.classList.add('hidden'); // banner replaces chip while visible
         phaseRow.classList.add('hidden');
         btnRun.disabled = false; btnStop.disabled = true;
@@ -1840,7 +1859,7 @@
       setVal('source_dir',   p.source_dir   || '');
       setVal('dest_base',    p.dest_base    || '');
       setVal('max_workers',  p.max_workers  != null ? p.max_workers : 6);
-      setChk('dry_run',      p.dry_run);
+      // dry_run intentionally not restored — should always default to off
       setChk('verbose',      p.verbose);
 
       setSel('target_sample_rate', p.target_sample_rate != null ? p.target_sample_rate : 48000);

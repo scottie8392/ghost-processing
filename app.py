@@ -99,6 +99,8 @@ def save_profile(data):
     if not profile.get("nas_remember_credentials"):
         profile["nas_username"] = ""
         profile["nas_password"] = ""
+    # Dry run is a one-off flag — never sticky
+    profile.pop("dry_run", None)
     src = data.get("source_dir", "").strip()
     if src and src not in profile.get("saved_sources", []):
         profile.setdefault("saved_sources", []).insert(0, src)
@@ -477,7 +479,7 @@ def run():
             if not os.path.exists(python):
                 python = "python3"
             _active_process = subprocess.Popen(
-                [python, PROCESS_SCRIPT, "--config", tmp.name],
+                [python, "-u", PROCESS_SCRIPT, "--config", tmp.name],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -486,16 +488,28 @@ def run():
                 # Terminal close on the Mac.
                 start_new_session=True,
             )
+            _log_prefix_re = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+ \w+:\s*")
             for line in _active_process.stdout:
-                msg = line.rstrip()
-                ml  = msg.lower()
-                if "converted:" in ml:
+                msg  = line.rstrip()
+                clean = _log_prefix_re.sub("", msg)
+                ml   = clean.lower()
+                if ml.startswith("done:") and " converted" in ml:
+                    # Authoritative counts from process_audio.py batch_process return values
+                    m = re.search(r'(\d+) converted', clean)
+                    if m: converted = int(m.group(1))
+                    m = re.search(r'(\d+) copied', clean)
+                    copied = int(m.group(1)) if m else 0
+                    m = re.search(r'(\d+) silent', clean)
+                    rejected = int(m.group(1)) if m else 0
+                    m = re.search(r'(\d+) skipped', clean)
+                    skipped = int(m.group(1)) if m else 0
+                elif ml.startswith("converted:") or ml.startswith("[dry run] would convert:"):
                     converted += 1
-                elif "copied (already at target" in ml:
+                elif ml.startswith("copied:") or ml.startswith("[dry run] would copy:"):
                     copied += 1
-                elif "rejecting:" in ml or "silent file" in ml or "zero-byte" in ml:
+                elif ml.startswith("rejected:"):
                     rejected += 1
-                elif "skipping:" in ml or "already processed" in ml:
+                elif ml.startswith("skipping:") or ml.startswith("already processed"):
                     skipped += 1
                 entry = {"type": "log", "message": msg}
                 _log_ring.append(entry)
@@ -523,7 +537,7 @@ def run():
             else:
                 job_status = "error"
 
-            done_entry = {"type": "done", "returncode": rc, "job_name": job_name, "status": job_status}
+            done_entry = {"type": "done", "returncode": rc, "job_name": job_name, "status": job_status, "dry_run": config.get("dry_run", False)}
             _log_ring.append(done_entry)
             _log_queue.put(done_entry)
             last_job_record = {

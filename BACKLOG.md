@@ -51,9 +51,10 @@ docker-compose up -d
 - [ ] **Silence detection calibration** — run against a known set of stems including intentionally silent tracks and sparse/SFX stems. Confirm correct rejection at default threshold (-50dB / 200ms). Use the analyzer (see 🟢 UI) to dial in settings first.
 - [x] **AIFF source files** — `.aif` extension detection fixed in `process_audio.py` and `verify_audio.py`; confirmed `.aif` files detected during test run.
 - [x] **Files with spaces and special characters in names** — confirmed working; test run used `/Users/scottie/Desktop/TR Test Show` (space in path) without issues.
-- [ ] **Deep folder nesting** — confirm recursive processing handles 3+ levels of subdirectories and output mirrors the structure exactly.
+- [x] **Deep folder nesting** — confirmed working; recursive processing handles 3+ levels, output mirrors source structure exactly.
 - [x] **Resume from interrupted run** — tested with 3 stop/resume cycles: stop during silence detection (no progress written → re-runs), stop after conversion (progress written → skips), stop before file starts (re-runs). Final run picked up exactly where it left off, verification clean. Note: partial dest file (stop mid-SoX write) handled correctly by design — progress.json only written on success, so partial file gets overwritten on resume.
-- [ ] **Dry run mode** — confirm no files are written and the log correctly reports what would have happened.
+- [x] **Dry run mode** — confirmed working; no files, dirs, or logs written. Log and banner match real run format. Amber banner with ◎ icon. Never persisted to profile.json.
+- [ ] **Dry run: save log option** — dry run currently outputs only to the UI (no files created). Add a "Save dry run log" checkbox that, when ticked, writes the dry run output to the central `logs/` directory only (no dest dir created).
 - [ ] **verify_audio.py after real run** — run the verifier against a completed job and confirm it accounts for all files.
 
 ### NAS (Mac)
@@ -105,6 +106,7 @@ These cover the gap between "job ran while browser/laptop was closed" and "user 
 
 ### Audio Quality
 - [ ] **AIFF output option** — some studios deliver stems as AIFF. Add an output format dropdown (WAV / AIFF) alongside sample rate and bit depth.
+- [ ] **Mono L/R pair combining** — Pro Tools exports stereo tracks as two mono files suffixed with ` L` and ` R` (space + letter, e.g. `Strings L.wav` / `Strings R.wav`). Add an option to detect matched pairs and merge them into a single stereo interleaved file (e.g. `Strings.wav`), dropping the ` L` / ` R` suffix. Files without either suffix are true mono and pass through unchanged. Pairs must match exactly on basename, extension, sample rate, and bit depth before merging. Use SoX `sox -M left.wav right.wav stereo.wav` (or equivalent merge command). Run after conversion so both channels are already at the target format before combining. Edge cases: unpaired ` L` or ` R` file (no matching partner) — pass through as-is and log a warning.
 - [ ] **Source sample rate reporting** — in the File Review panel or log, show the detected sample rate of each source file before conversion. Useful for spotting sessions with mixed rates.
 
 ### UI / UX
@@ -121,7 +123,7 @@ These cover the gap between "job ran while browser/laptop was closed" and "user 
 - [ ] **docker-compose.yml missing config file mount** — `config.docker.yaml` is not mounted into the container, so the defaults baked into the image are used. Mount it as a volume so settings can be updated without a rebuild: `./config.docker.yaml:/app/config.docker.yaml`.
 - [ ] **Synology deployment workflow** — no documented process for getting the image onto the NAS and keeping it updated. Options to evaluate and document: (1) build on Mac + `docker save | ssh NAS docker load` — no registry needed, works offline; (2) push to Docker Hub or a private registry + pull from Container Manager on the NAS; (3) copy the project folder to the NAS over SSH/SMB and build directly on the NAS (`docker compose up --build`). Option 3 is simplest for a single-NAS setup. Also: Synology Container Manager can import a `docker-compose.yml` directly via its UI — worth documenting as the non-CLI path for future reference.
 - [ ] **`save_profile()` is not atomic** — `app.py`'s `save_profile()` uses a plain `open()` + `json.dump()`, unlike the atomic tempfile+fsync+rename pattern used correctly in `process_audio.py`. Low risk for a local app but inconsistent — a crash mid-write could corrupt `profile.json`.
-- [ ] **Completion counts parsed from log text** — `run_process()` in `app.py` counts converted/rejected/skipped by pattern-matching stdout strings. If a log message changes wording, counts silently go wrong. Better: have `process_audio.py` emit a structured JSON summary line at the end and parse that.
+- [x] **Completion counts parsed from log text** — `run_process()` in `app.py` still does incremental line-by-line counting as a live signal for the phase bar, but the final banner counts now come from parsing the `"Done: N converted[, N copied][, N silent][, N skipped] in Xs"` line emitted by `process_audio.py`'s `batch_process()` return values. This is authoritative regardless of parallel worker log ordering.
 
 ---
 
@@ -179,6 +181,13 @@ These cover the gap between "job ran while browser/laptop was closed" and "user 
 - [x] Dry Run moved to its own field with field-label + hint (matches Workers layout); Verbose Logs moved to Advanced → Logging section
 - [x] Already-at-target files copied to output instead of skipped — `shutil.copy2` + `status: "copied"` in `progress.json`; UI shows "N copied" in completion banner and last-run chip when non-zero
 - [x] NAS share chip error cleared on re-select — clicking a working share after a failed one now correctly shows "Connected" status
+- [x] Dry run overhaul — no files, dirs, or logs written; amber banner with ◎ icon and "Dry Run" title; log format unified with real run (timestamps stripped, colour-coded, format info per file e.g. `Checking: foo.wav (48k/24b)`); dry_run never persisted to profile.json
+- [x] Log display cleanup — Python timestamp prefix stripped from all UI log lines; colour-coded by type (success/warn/error/dim/meta/dry-run); format info (rate/depth) shown per file
+- [x] "New Run" button removed from completion banner — no longer needed
+- [x] tqdm removed from batch_process loop — tqdm wrote `\r` carriage returns to stderr (merged with stdout pipe); Python's universal-newlines mode treats `\r` as a line terminator, so tqdm updates interleaving with parallel worker log writes were splitting/corrupting those lines. Replaced with plain `as_completed()` loop; UI phase bar handles progress display
+- [x] "Done:" line as authoritative count source — app.py now parses `"Done: N converted..."` line from process_audio.py as the final authoritative counts for the SSE summary event and banner, fixing race conditions where parallel worker "Rejected:" or "Checking:" lines arrived after other output
+- [x] process_file returns "skipped" — previously returned None for both rejected (silent) and already-processed (skipped) files; batch_process counted both as rejected. Now returns "skipped" string; batch_process counts it separately; "Done:" line and banner show correct split
+- [x] File Review panel "Skipped" label — changed to "Skipped — already exist in destination" (accurate: skip requires dest file exists + source hash match)
 
 ---
 
@@ -206,3 +215,7 @@ These cover the gap between "job ran while browser/laptop was closed" and "user 
 | 2026-03-23 | Run log written to dest dir alongside progress.json | Each dest folder is self-contained (log + progress + rejects); easier to archive and audit |
 | 2026-03-23 | sudoers check: `sudo -n /sbin/mount_nfs 2>&1 \| grep "password is required"` | Previous check used `sudo -n grep` and `--help` flag; both returned non-zero even when rule was installed. Stderr string is reliable. |
 | 2026-03-23 | `_stop_requested` flag to distinguish Stop from error | returncode is non-zero for both user stop (SIGTERM → -15) and genuine crash — can't use it alone. Flag set in `/stop` before killpg, read in `run_process` after wait(). rc==0 check is first so a clean finish can't be mislabeled. |
+| 2026-03-24 | Remove tqdm from batch_process | tqdm's `\r` progress bar updates written to stderr (merged into stdout pipe) were corrupting parallel worker log lines via universal-newlines line splitting. UI has its own phase bar — tqdm added nothing and broke output. |
+| 2026-03-24 | "Done:" line as authoritative count source | `batch_process()` counts from `process_file` return values (accurate). app.py's line-by-line count is unreliable when parallel workers write simultaneously. Parsing the final "Done:" summary gives exact numbers regardless of ordering. |
+| 2026-03-24 | process_file returns "skipped" string | Was returning None for both rejected and skipped — batch_process couldn't distinguish them. Returning "skipped" lets batch_process count accurately; "Done:" line and banner reflect the real split. |
+| 2026-03-24 | Dry run writes nothing — not even the top-level dest dir | Dry run is a report tool. Creating directories or log files would be confusing and potentially polluting. All output goes to the UI only. |

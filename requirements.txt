@@ -9,5 +9,4 @@ waitress==3.0.1       # Production WSGI server (clean output, no dev-server warn
 psutil==5.9.8         # Child process management for graceful shutdown
 pydub==0.25.1         # Audio decoding and silence detection
 PyYAML==6.0.1         # Config file parsing
-tqdm==4.66.4          # Progress bars
 watchdog==4.0.1       # Filesystem event monitoring (watch mode)
