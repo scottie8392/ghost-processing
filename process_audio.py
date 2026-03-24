@@ -313,7 +313,8 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
             # 32i. When 32f is requested for an AIF/AIFF source, output as .wav
             # which reliably supports float.
             is_float = str(bit_depth) == "32f"
-            dest_ext  = ".wav" if (is_float and ext.lower() in (".aif", ".aiff")) else ext
+            force_wav = config.get("force_wav", False)
+            dest_ext  = ".wav" if (force_wav or (is_float and ext.lower() in (".aif", ".aiff"))) else ext
             dest_path = os.path.join(dest_dir, f"{base}-{suffix}{dest_ext}")
             if not config.get("dry_run"):
                 os.makedirs(os.path.dirname(dest_path), exist_ok=True)
@@ -488,8 +489,9 @@ def run_verification(config, dest_dir, progress_log, rejects_log):
         if data.get("status") not in ("converted", "copied"):
             continue
         base, ext = os.path.splitext(rel)
-        # Mirror the 32f AIF→WAV extension swap used during conversion
-        dest_ext  = ".wav" if (is_float and ext.lower() in (".aif", ".aiff")) else ext
+        # Mirror the extension logic used during conversion
+        force_wav = config.get("force_wav", False)
+        dest_ext  = ".wav" if (force_wav or (is_float and ext.lower() in (".aif", ".aiff"))) else ext
         dest_path = os.path.join(dest_dir, f"{base}-{suffix}{dest_ext}")
         if not os.path.exists(dest_path):
             missing_dest.append(rel)

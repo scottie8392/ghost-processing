@@ -107,7 +107,7 @@ These cover the gap between "job ran while browser/laptop was closed" and "user 
 
 ### Audio Quality
 - [ ] **AIFF output option** — some studios deliver stems as AIFF. Add an output format dropdown (WAV / AIFF) alongside sample rate and bit depth.
-- [ ] **Force WAV output toggle** — option to force all output to `.wav` regardless of source format (AIF in → WAV out). Useful for deliveries that require WAV-only. Currently output format mirrors source except for the 32f+AIF edge case.
+- [x] **Force WAV output toggle** — checkbox in UI; `force_wav` config flag passed to process_audio.py; dest_ext logic updated in both process_file and run_verification.
 - [ ] **Mono L/R pair combining** — Pro Tools exports stereo tracks as two mono files suffixed with ` L` and ` R` (space + letter, e.g. `Strings L.wav` / `Strings R.wav`). Add an option to detect matched pairs and merge them into a single stereo interleaved file (e.g. `Strings.wav`), dropping the ` L` / ` R` suffix. Files without either suffix are true mono and pass through unchanged. Pairs must match exactly on basename, extension, sample rate, and bit depth before merging. Use SoX `sox -M left.wav right.wav stereo.wav` (or equivalent merge command). Run after conversion so both channels are already at the target format before combining. Edge cases: unpaired ` L` or ` R` file (no matching partner) — pass through as-is and log a warning.
 - [ ] **Source sample rate reporting** — in the File Review panel or log, show the detected sample rate of each source file before conversion. Useful for spotting sessions with mixed rates.
 - [ ] **Per-file peak level display (QC)** — log peak dBFS for each file during the Checking phase. Surfaces which files are near the silence threshold (quiet room tone, sparse SFX) vs full-level stems. Essential for silence calibration — helps explain why a file was rejected or kept and gives confidence in the threshold setting. Could show inline in the log (`Checking: stem.wav (48k/24b, peak -32dBFS)`) and optionally in the File Review panel.
@@ -120,7 +120,7 @@ These cover the gap between "job ran while browser/laptop was closed" and "user 
 
 ### Infrastructure
 - [ ] **Auto-discover NAS on network** — use mDNS/Bonjour to detect NAS devices on the local subnet and suggest them in the IP field. Removes the need to know or remember the NAS IP.
-- [ ] **Remove setup.sh** — now fully redundant since `start.command` handles everything. Keep for reference or delete to reduce confusion.
+- [x] **Remove setup.sh** — deleted; fully redundant since `start.command` handles all setup.
 - [ ] **Docker: template hot-reload in container** — `TEMPLATES_AUTO_RELOAD` is set in app.py but Waitress doesn't use Flask's reloader. Consider a volume mount for the template in docker-compose.yml for easier UI iteration without rebuilds.
 - [ ] **docker-compose.yml missing dest volume** — the current compose file only mounts a source volume (`/volume1/Stems`). There is no volume for the converted output, which means converted files would be written inside the container and lost on rebuild. Add a second volume for the destination (e.g. `/volume1/Converted:/data/converted`) and update the config accordingly.
 - [ ] **docker-compose.yml missing config file mount** — `config.docker.yaml` is not mounted into the container, so the defaults baked into the image are used. Mount it as a volume so settings can be updated without a rebuild: `./config.docker.yaml:/app/config.docker.yaml`.

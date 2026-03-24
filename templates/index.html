@@ -782,6 +782,11 @@
         <input type="checkbox" id="dry_run" style="margin-top:5px;">
         <div class="hint">Simulates the run without writing any files. Shows exactly what would be converted, skipped, or rejected — useful before committing a large batch.</div>
       </div>
+      <div class="field">
+        <label class="field-label" for="force_wav">Force WAV Output</label>
+        <input type="checkbox" id="force_wav" style="margin-top:5px;">
+        <div class="hint">Output all files as .wav regardless of source format.</div>
+      </div>
     </div>
 
     <!-- Advanced -->
@@ -1093,6 +1098,7 @@
       dest_base:          document.getElementById('dest_base').value.trim(),
       max_workers:        parseInt(document.getElementById('max_workers').value) || 6,
       dry_run:            document.getElementById('dry_run').checked,
+      force_wav:          document.getElementById('force_wav').checked,
       verbose:            document.getElementById('verbose').checked,
       target_sample_rate: parseInt(document.getElementById('target_sample_rate').value) || 48000,
       bit_depth:          document.getElementById('bit_depth').value,
@@ -1864,6 +1870,7 @@
       setVal('dest_base',    p.dest_base    || '');
       setVal('max_workers',  p.max_workers  != null ? p.max_workers : 6);
       // dry_run intentionally not restored — should always default to off
+      setChk('force_wav',    p.force_wav);
       setChk('verbose',      p.verbose);
 
       setSel('target_sample_rate', p.target_sample_rate != null ? p.target_sample_rate : 48000);
