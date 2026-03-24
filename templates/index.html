@@ -265,14 +265,14 @@
 
     .btn-reset {
       background: transparent;
-      color: var(--text-dim);
-      border: 1px solid transparent;
-      font-size: 11px;
+      color: #888;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 12px;
       font-weight: 500;
-      padding: 6px 10px;
-      margin-top: 4px;
+      padding: 6px 12px;
     }
-    .btn-reset:hover { color: var(--warn); border-color: var(--border); }
+    .btn-reset:hover { color: var(--warn); border-color: var(--warn); background: rgba(200,144,48,0.07); }
 
     /* Output */
     .output-bar {
@@ -774,6 +774,10 @@
       <summary>Advanced</summary>
       <div class="detail-body">
 
+        <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
+          <button class="btn-reset" onclick="resetToDefaults()">↺ Reset to defaults</button>
+        </div>
+
         <!-- Audio Conversion -->
         <div class="adv-section-label">Audio Conversion</div>
         <div class="row">
@@ -848,11 +852,6 @@
                    placeholder="(default: logs/ inside project folder)">
             <div class="hint">Each run creates a timestamped file.</div>
           </div>
-        </div>
-
-        <!-- Reset -->
-        <div style="margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px;">
-          <button class="btn-reset" onclick="resetToDefaults()">↺ Reset advanced to defaults</button>
         </div>
 
       </div>
