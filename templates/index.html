@@ -413,6 +413,7 @@
     }
     .completion-title {
       font-size: 20px;
+      line-height: 1.3;
       font-weight: 700;
       color: var(--text);
       letter-spacing: -0.3px;
@@ -428,6 +429,7 @@
     .completion-stats .cs-rejected  { color: var(--error);   font-weight: 600; }
     .completion-stats .cs-skipped   { color: #666;           font-weight: 600; }
     .completion-stats .cs-sep       { color: #333; }
+    .completion-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
     .btn-new-run {
       margin-top: 6px;
       padding: 6px 18px;
@@ -899,10 +901,13 @@
       <span class="phase-count" id="phase-count"></span>
     </div>
 
-    <!-- Completion banner — shown when job finishes -->
+    <!-- Completion banner — shown when job finishes or on reconnect -->
     <div class="completion-banner hidden" id="completion-banner">
       <div class="completion-icon" id="completion-icon"></div>
-      <div class="completion-title" id="completion-title"></div>
+      <div>
+        <div class="completion-title" id="completion-title"></div>
+        <div class="completion-sub" id="completion-sub"></div>
+      </div>
       <div class="completion-stats" id="completion-stats"></div>
     </div>
 
@@ -969,22 +974,14 @@
   const phaseFill        = document.getElementById('phase-fill');
   const phaseCount       = document.getElementById('phase-count');
   let rejectedCount = 0, skippedCount = 0, convertedCount = 0, copiedCount = 0;
-  let totalFiles = 0, analyzedCount = 0, phaseConverting = false;
+  let totalFiles = 0, liveDoneCount = 0;
 
   function updatePhase() {
     if (totalFiles === 0) return;
-    if (!phaseConverting) {
-      phaseLabel.textContent = 'Detecting silence';
-      const pct = Math.round((analyzedCount / totalFiles) * 100);
-      phaseFill.style.width = pct + '%';
-      phaseCount.textContent = analyzedCount + '/' + totalFiles;
-    } else {
-      phaseLabel.textContent = 'Converting';
-      const done = convertedCount + copiedCount + rejectedCount + skippedCount;
-      const pct  = Math.round((done / totalFiles) * 100);
-      phaseFill.style.width = pct + '%';
-      phaseCount.textContent = done + '/' + totalFiles;
-    }
+    phaseLabel.textContent = 'Processing';
+    const pct = Math.round((liveDoneCount / totalFiles) * 100);
+    phaseFill.style.width = pct + '%';
+    phaseCount.textContent = liveDoneCount + '/' + totalFiles;
   }
 
   const DEFAULTS = {
@@ -1116,7 +1113,7 @@
     rejectedList.innerHTML = '<li class="review-empty">None this run</li>';
     skippedList.innerHTML  = '<li class="review-empty">None this run</li>';
     rejectedCount = 0; skippedCount = 0; convertedCount = 0; copiedCount = 0;
-    totalFiles = 0; analyzedCount = 0; phaseConverting = false;
+    totalFiles = 0; liveDoneCount = 0;
     badgeRejected.textContent = '0 rejected';
     badgeSkipped.textContent  = '0 skipped';
     reviewCard.classList.add('hidden');
@@ -1176,7 +1173,7 @@
     if (empty) empty.remove();
     const li = document.createElement('li');
     li.className = type;
-    const match = text.match(/(?:rejecting|skipping):\s*(.+)$/i);
+    const match = text.match(/^[^:]+:\s*(.+?)(?:\s{2,}|$)/i);
     li.textContent = match ? match[1].trim() : text;
     list.appendChild(li);
     if (type === 'rejected') {
@@ -1202,7 +1199,7 @@
     }
   }
 
-  function showCompletion(name, status, converted, copied, rejected, skipped, isDryRun) {
+  function showCompletion(name, status, converted, copied, rejected, skipped, isDryRun, finishedAt = null) {
     const ok      = status === 'done';
     const stopped = status === 'stopped';
     const bannerClass = isDryRun ? 'dry-run' : (ok ? 'done' : (stopped ? 'stopped' : 'error'));
@@ -1210,6 +1207,13 @@
     completionIcon.textContent  = isDryRun ? '◎' : (ok ? '✓' : (stopped ? '◼' : '✗'));
     const baseLabel = ok ? 'Done' : (stopped ? 'Stopped' : 'Finished with errors');
     completionTitle.textContent = isDryRun ? 'Dry Run' : baseLabel;
+    const subEl = document.getElementById('completion-sub');
+    if (finishedAt) {
+      const when = new Date(finishedAt).toLocaleString([], {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
+      subEl.textContent = `Last run · ${when}`;
+    } else {
+      subEl.textContent = '';
+    }
     let stats =
       `<span class="cs-converted">${converted} converted</span>`;
     if (copied > 0) {
@@ -1297,13 +1301,11 @@
           const m = ml.match(/found (\d+) audio files/);
           if (m) { totalFiles = parseInt(m[1]); phaseRow.classList.remove('hidden'); }
         }
-        if (ml.startsWith('analyzing:')) {
-          analyzedCount++;
-          updatePhase();
-        } else if (!phaseConverting && (ml.startsWith('converted:') || ml.includes('[dry run] would convert:') || ml.startsWith('copied:') || ml.includes('[dry run] would copy:') || ml.startsWith('rejected:') || ml.includes('skipping:') || ml.includes('already processed'))) {
-          phaseConverting = true;
-          updatePhase();
-        } else if (phaseConverting) {
+        if (ml.startsWith('converted:') || ml.includes('[dry run] would convert:') ||
+            ml.startsWith('copied:')    || ml.includes('[dry run] would copy:')    ||
+            ml.startsWith('rejected:') ||
+            ml.includes('skipping:')   || ml.includes('already processed')) {
+          liveDoneCount++;
           updatePhase();
         }
       } else if (data.type === 'summary') {
@@ -1911,7 +1913,6 @@
         if (empty) empty.textContent = 'Rejoined a running job — new output will appear below.';
         connectStream();
       } else if (data.last_job) {
-        // No active job — show last completed job as a chip in the status bar
         showLastRunChip(data.last_job);
       }
     } catch (e) { /* ignore */ }

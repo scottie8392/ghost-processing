@@ -47,6 +47,22 @@ def ignore_sigint():
 # Setup
 # ---------------------------------------------------------------------------
 
+def prune_logs(log_dir, keep=10):
+    """Keep only the most recent `keep` run_*.log files; delete the rest."""
+    try:
+        logs = sorted(
+            [f for f in os.listdir(log_dir) if f.startswith("run_") and f.endswith(".log")],
+            reverse=True,
+        )
+        for old in logs[keep:]:
+            try:
+                os.remove(os.path.join(log_dir, old))
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
 def setup_logging(log_dir, verbose=False, dry_run=False):
     run_ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     level = logging.DEBUG if verbose else logging.INFO
@@ -56,6 +72,7 @@ def setup_logging(log_dir, verbose=False, dry_run=False):
     handlers = [logging.StreamHandler()]
     if not dry_run:
         os.makedirs(log_dir, exist_ok=True)
+        prune_logs(log_dir)
         run_log = os.path.join(log_dir, f"run_{run_ts}.log")
         main_log = os.path.join(log_dir, "process_audio.log")
         handlers += [logging.FileHandler(main_log), logging.FileHandler(run_log)]
@@ -198,19 +215,25 @@ def output_suffix(target_rate, bit_depth):
     return f"{rate_part}-{depth_part}"
 
 
-def is_entirely_silent(audio_file, silence_thresh, min_silence_len, min_non_silent_len):
+def check_silence(audio_file, silence_thresh, min_silence_len, min_non_silent_len):
+    """
+    Returns (is_silent, peak_db).
+    peak_db is a float (dBFS), or None on decode error.
+    Loads audio once and returns both results to avoid a second file read.
+    """
     try:
         audio = AudioSegment.from_file(audio_file)
+        peak_db = audio.max_dBFS  # -inf for truly silent files
         non_silent = silence.detect_nonsilent(
             audio, min_silence_len=min_non_silent_len, silence_thresh=silence_thresh
         )
-        return not bool(non_silent)
+        return not bool(non_silent), peak_db
     except CouldntDecodeError as e:
         logging.error(f"Decode error for {audio_file}: {e}")
-        return False  # Treat as non-silent to avoid false rejects
+        return False, None  # Treat as non-silent to avoid false rejects
     except Exception as e:
         logging.error(f"Silence detection error for {audio_file}: {e}")
-        return False
+        return False, None
 
 
 def resample_audio(audio_file, dest_file, target_rate, bit_depth, dry_run):
@@ -332,9 +355,6 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                     logging.info(f"Already processed, skipping: {rel_path}")
                     return "skipped"
 
-            # Already at target rate and bit depth — copy to dest so output
-            # folder is complete (all stems present, not just converted ones).
-            # Silent files are still the only ones that get rejected entirely.
             sample_rate = get_sample_rate(file_path)
             source_bits = get_bit_depth(file_path)
             is_float_target = str(bit_depth) == "32f"
@@ -345,27 +365,17 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
             dest_fmt = f"{fmt_rate(target_rate)}/{fmt_depth(bit_depth)}"
             logging.info(f"Checking: {rel_path}  ({src_fmt})")
 
-            if already_right_rate and already_right_depth:
-                if config["dry_run"]:
-                    logging.info(f"[DRY RUN] Would copy: {rel_path}  ({src_fmt}, no conversion needed)")
-                    return "copied"
-                shutil.copy2(file_path, dest_path)
-                src_hash = file_hash(file_path)
-                append_log(
-                    progress_log,
-                    {rel_path: {"status": "copied", "source_hash": src_hash, "timestamp": str(datetime.now())}},
-                    is_list=False,
-                )
-                logging.info(f"Copied: {rel_path}  ({src_fmt}, no conversion needed)")
-                return "copied"
-
-            if is_entirely_silent(
+            # Silence check runs on ALL files before copy or convert.
+            # A silent file never reaches the destination regardless of format.
+            is_silent, peak_db = check_silence(
                 file_path,
                 config["silence_thresh"],
                 config["min_silence_len"],
                 config["min_non_silent_len"],
-            ):
-                logging.info(f"Rejected: {rel_path}  (silent)")
+            )
+            peak_str = f"  peak {peak_db:.1f}dBFS" if peak_db is not None and peak_db != float("-inf") else "  peak -∞dBFS" if peak_db is not None else ""
+            if is_silent:
+                logging.info(f"Rejected: {rel_path}  ({src_fmt}, silent,{peak_str})")
                 if not config.get("dry_run"):
                     append_log(
                         rejects_log,
@@ -374,9 +384,21 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                     )
                 return None
 
-            # Silence check passed — log now so the phase bar tracks actual completions
-            if not config.get("dry_run"):
-                logging.info(f"Analyzing: {rel_path}")
+            # Already at target rate and bit depth — copy, don't resample
+            if already_right_rate and already_right_depth:
+                if config["dry_run"]:
+                    logging.info(f"[DRY RUN] Would copy: {rel_path}  ({src_fmt}, no conversion needed,{peak_str})")
+                    return "copied"
+                shutil.copy2(file_path, dest_path)
+                src_hash = file_hash(file_path)
+                append_log(
+                    progress_log,
+                    {rel_path: {"status": "copied", "source_hash": src_hash, "timestamp": str(datetime.now())}},
+                    is_list=False,
+                )
+                logging.info(f"Copied: {rel_path}  ({src_fmt}, no conversion needed,{peak_str})")
+                return "copied"
+
             if resample_audio(file_path, dest_path, target_rate, bit_depth, config["dry_run"]):
                 if not config["dry_run"]:
                     src_hash = file_hash(file_path)
@@ -386,9 +408,9 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                         is_list=False,
                     )
                 if config["dry_run"]:
-                    logging.info(f"[DRY RUN] Would convert: {rel_path}  ({src_fmt} → {dest_fmt})")
+                    logging.info(f"[DRY RUN] Would convert: {rel_path}  ({src_fmt} → {dest_fmt},{peak_str})")
                 else:
-                    logging.info(f"Converted: {rel_path}  ({src_fmt} → {dest_fmt})")
+                    logging.info(f"Converted: {rel_path}  ({src_fmt} → {dest_fmt},{peak_str})")
                 return file_path
             return None
 

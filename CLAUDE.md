@@ -37,9 +37,10 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - Job naming from source directory basename
 - Completion banner (✓/◼/✗, converted / copied / rejected / skipped counts) — distinguishes Done / Stopped / Error; "copied" shown only when non-zero
 - Dry run mode — amber banner with ◎ icon; no files, dirs, or logs written; report-only; never persisted to profile.json
-- Log display — Python timestamp prefix stripped; colour-coded (success/warn/error/dim/meta/dry-run); format info per file e.g. `Checking: stem.aif (96k/24b)`
+- Log display — Python timestamp prefix stripped; colour-coded; uniform format per file: `Checking: stem.aif (96k/24b)`, `Copied: stem.aif (48k/24b, no conversion needed, peak -0.0dBFS)`, `Converted: stem.aif (96k/24b → 48k/24b, peak -0.0dBFS)`, `Rejected: stem.aif (96k/24b, silent, peak -∞dBFS)`
+- Per-file peak level (`max_dBFS`) shown on all result lines — **note: peak and silence threshold use different measurements (peak vs RMS); see BACKLOG.md 🔴**
 - File Review panel — live-updating lists of rejected (silent) and skipped (already in dest) files with counts
-- `last_job.json` — last job result shown in status bar on fresh page load; status is `"done"` / `"stopped"` / `"error"` (not just pass/fail)
+- `last_job.json` — last job result shown as small status chip on fresh page load; status is `"done"` / `"stopped"` / `"error"`
 - macOS Notification Center alert via osascript on completion
 - Process detachment (`start_new_session=True`) — conversion survives Terminal close
 - Stop button kills entire process group (`os.killpg`) — SoX workers actually stop
@@ -65,8 +66,15 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - SMB end-to-end — confirmed working; share name vs mount point mismatch fixed; local dest path routing fixed; SIGKILL escalation on Stop
 - `.aif` (single-f) files correctly detected and converted
 - Ableton `.asd` sidecar files correctly ignored
-- Silence detection: truly silent file rejected; sparse/noisy content correctly kept
-- Dry run mode: no files written, all counts correct, amber banner
+- Silence detection: truly silent file rejected; sparse/noisy content correctly kept — **calibration needed, see BACKLOG.md 🔴 (peak vs RMS mismatch)**
+- Dry run mode: no files written, all counts correct, amber banner, format matches real run
+- Force WAV output toggle — forces all output to .wav regardless of source format
+- Silence detection now runs on ALL files before copy or convert — silent files never reach destination regardless of format
+- Progress bar tracks live file completions (liveDoneCount); label "Processing X/N"
+- Log rotation — keeps 10 most recent run_*.log files in logs/; oldest pruned on each run
+- Stop button SIGKILL escalation — SIGTERM + SIGKILL after 5s for workers blocked on SMB/NFS I/O
+- NAS mode dest path: local absolute paths (e.g. /Users/scottie/Desktop) used as-is; not mangled through NAS share detection
+- SMB share name vs mount point: uses nasShareRoot (actual share name) not the local folder name which macOS may suffix with -1/-2
 
 ### Not yet tested:
 - NFS/SMB network drop mid-run
@@ -82,7 +90,7 @@ See BACKLOG.md 🟡 section. Priority: SMB end-to-end, then Docker.
 
 ### 2. Remaining 🔴 bugs
 - **BWF metadata stripped by SoX** — BEXT chunks (timecode, originator) not preserved. Fix: `bwfmetaedit` post-step.
-- **Silence calibration** — needs real sparse/SFX stems to calibrate threshold. Analyzer feature (🟢) will help.
+- **Silence detection measurement mismatch** — log displays `max_dBFS` (peak) but `detect_nonsilent` uses RMS of chunks. Must unify before trusting automated rejection. See BACKLOG.md for full details.
 
 ### 3. Docker compose gaps (before Docker test)
 - Add dest volume to docker-compose.yml
