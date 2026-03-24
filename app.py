@@ -106,8 +106,12 @@ def save_profile(data):
     if src and src not in profile.get("saved_sources", []):
         profile.setdefault("saved_sources", []).insert(0, src)
         profile["saved_sources"] = profile["saved_sources"][:10]
-    with open(PROFILE_PATH, "w") as f:
+    tmp_path = PROFILE_PATH + ".tmp"
+    with open(tmp_path, "w") as f:
         json.dump(profile, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, PROFILE_PATH)
 
 
 # ---------------------------------------------------------------------------
