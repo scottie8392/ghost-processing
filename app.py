@@ -302,9 +302,15 @@ def resolve_paths(data):
     source_full = os.path.join(mount_point, source_subpath)
 
     if dest:
-        # If dest was given as a full NAS path, strip the share prefix too
-        _, dest_subpath = detect_nas_share(dest, protocol)
-        dest_full = os.path.join(mount_point, dest_subpath)
+        # If dest is a local absolute path (its parent exists on this machine),
+        # use it directly — e.g. /Users/scottie/Desktop. Otherwise treat it as
+        # a NAS-relative path and resolve it through the mount point.
+        dest_parent = os.path.dirname(dest.rstrip("/")) or "/"
+        if os.path.isabs(dest) and os.path.exists(dest_parent):
+            dest_full = dest
+        else:
+            _, dest_subpath = detect_nas_share(dest, protocol)
+            dest_full = os.path.join(mount_point, dest_subpath)
     else:
         # Default: same directory as source (output folder lands next to it)
         dest_full = os.path.dirname(source_full)
@@ -725,13 +731,19 @@ def stop():
     if _active_process and _active_process.poll() is None:
         _stop_requested = True
         try:
-            # Kill the entire process group — the subprocess was started with
-            # start_new_session=True, so it and all its SoX workers share a
-            # process group that is separate from the server. Terminating just
-            # _active_process would leave the SoX children running.
-            os.killpg(os.getpgid(_active_process.pid), signal.SIGTERM)
+            pgid = os.getpgid(_active_process.pid)
+            os.killpg(pgid, signal.SIGTERM)
+            # Workers may be blocked on SMB/NFS kernel I/O and won't respond to
+            # SIGTERM until the syscall returns. Escalate to SIGKILL after 5s.
+            def _force_kill(pgid):
+                time.sleep(5)
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except (ProcessLookupError, OSError):
+                    pass
+            threading.Thread(target=_force_kill, args=(pgid,), daemon=True).start()
         except ProcessLookupError:
-            pass  # Process already exited between poll() and killpg()
+            pass
         return jsonify({"status": "stopped"})
     return jsonify({"status": "not running"})
 

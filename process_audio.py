@@ -346,7 +346,7 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
 
             if already_right_rate and already_right_depth:
                 if config["dry_run"]:
-                    logging.info(f"[DRY RUN] Would copy: {rel_path}  ({src_fmt}, already at target)")
+                    logging.info(f"[DRY RUN] Would copy: {rel_path}  ({src_fmt}, no conversion needed)")
                     return "copied"
                 shutil.copy2(file_path, dest_path)
                 src_hash = file_hash(file_path)
@@ -355,7 +355,7 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                     {rel_path: {"status": "copied", "source_hash": src_hash, "timestamp": str(datetime.now())}},
                     is_list=False,
                 )
-                logging.info(f"Copied: {rel_path}  ({src_fmt}, already at target)")
+                logging.info(f"Copied: {rel_path}  ({src_fmt}, no conversion needed)")
                 return "copied"
 
             if is_entirely_silent(

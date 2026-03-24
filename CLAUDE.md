@@ -62,13 +62,13 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - Already-processed files skipped (not counted as silent) — correctly shown as "N skipped" in banner and File Review
 - Resume from interrupted run — 3 stop/resume cycles confirmed; progress.json correctly gates skips; partial dest files re-converted by design
 - NFS end-to-end — NAS mode, real session folder, 48kHz/24-bit, verification clean
+- SMB end-to-end — confirmed working; share name vs mount point mismatch fixed; local dest path routing fixed; SIGKILL escalation on Stop
 - `.aif` (single-f) files correctly detected and converted
 - Ableton `.asd` sidecar files correctly ignored
 - Silence detection: truly silent file rejected; sparse/noisy content correctly kept
 - Dry run mode: no files written, all counts correct, amber banner
 
 ### Not yet tested:
-- SMB end-to-end conversion run
 - NFS/SMB network drop mid-run
 - Docker end-to-end
 - Watch mode
@@ -224,4 +224,4 @@ python verify_audio.py --config config.local.yaml
 
 - Branch: `main`
 - Remote: `origin/main` configured
-- Working tree: uncommitted changes from 2026-03-24 session (tqdm removal, skipped count fix, dry run overhaul, log formatting, Done: line parsing, doc updates)
+- Working tree: uncommitted changes from 2026-03-24 session

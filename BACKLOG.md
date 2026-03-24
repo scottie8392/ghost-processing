@@ -59,7 +59,7 @@ docker-compose up -d
 
 ### NAS (Mac)
 - [x] **Full NFS conversion run** — confirmed working end-to-end: NAS mode, NFS mount, real session folder, 48kHz/24-bit. Verification passed — all files accounted for.
-- [ ] **Full SMB conversion run** — same as above via SMB protocol.
+- [x] **Full SMB conversion run** — confirmed working end-to-end. Fixed share name vs mount point mismatch (macOS appends -1/-2 on naming conflicts — now uses nasShareRoot instead of mount point folder name). Fixed hung Stop (SIGTERM + SIGKILL escalation after 5s for workers blocked on SMB I/O).
 - [x] **NAS share chip: error state not cleared on second selection** — after a failed mount (permission denied), clicking a second working share chip left the error message visible even on success. Fixed: the early-return path (already-mounted share) now calls `showNasStatus('connected', ...)` before opening the browser.
 - [ ] **Multiple chips — same NAS, different shares** — confirm clicking chip A, browsing, then clicking chip B mounts and browses the new share independently.
 - [ ] **unRAID appdata NFS mount** — confirm this specific share mounts after re-applying the export in unRAID settings.
@@ -181,6 +181,10 @@ These cover the gap between "job ran while browser/laptop was closed" and "user 
 - [x] Dry Run moved to its own field with field-label + hint (matches Workers layout); Verbose Logs moved to Advanced → Logging section
 - [x] Already-at-target files copied to output instead of skipped — `shutil.copy2` + `status: "copied"` in `progress.json`; UI shows "N copied" in completion banner and last-run chip when non-zero
 - [x] NAS share chip error cleared on re-select — clicking a working share after a failed one now correctly shows "Connected" status
+- [x] SMB share name vs mount point mismatch — macOS appends -1/-2 when share name conflicts with existing mount; selectDir() now uses nasShareRoot (actual share name) instead of deriving it from the mount point folder name
+- [x] Stop button SIGKILL escalation — after SIGTERM, spawns a thread that SIGKILLs the process group after 5s; fixes "Already processing" stuck state when workers are blocked on NFS/SMB kernel I/O
+- [x] NAS mode dest path resolution — local absolute paths (e.g. /Users/scottie/Desktop) were being treated as NAS-relative paths, routing output to the NAS mount. Now detects local paths by checking if the parent directory exists and uses them as-is
+- [x] Log and banner colors — Rejected: lines changed from amber to red (matches File Review panel); Copied: lines green in both terminal log and completion banner (matches Converted); "no conversion needed" replaces "already at target" in Copied log messages
 - [x] Dry run overhaul — no files, dirs, or logs written; amber banner with ◎ icon and "Dry Run" title; log format unified with real run (timestamps stripped, colour-coded, format info per file e.g. `Checking: foo.wav (48k/24b)`); dry_run never persisted to profile.json
 - [x] Log display cleanup — Python timestamp prefix stripped from all UI log lines; colour-coded by type (success/warn/error/dim/meta/dry-run); format info (rate/depth) shown per file
 - [x] "New Run" button removed from completion banner — no longer needed
@@ -219,3 +223,5 @@ These cover the gap between "job ran while browser/laptop was closed" and "user 
 | 2026-03-24 | "Done:" line as authoritative count source | `batch_process()` counts from `process_file` return values (accurate). app.py's line-by-line count is unreliable when parallel workers write simultaneously. Parsing the final "Done:" summary gives exact numbers regardless of ordering. |
 | 2026-03-24 | process_file returns "skipped" string | Was returning None for both rejected and skipped — batch_process couldn't distinguish them. Returning "skipped" lets batch_process count accurately; "Done:" line and banner reflect the real split. |
 | 2026-03-24 | Dry run writes nothing — not even the top-level dest dir | Dry run is a report tool. Creating directories or log files would be confusing and potentially polluting. All output goes to the UI only. |
+| 2026-03-24 | SIGTERM + SIGKILL escalation for Stop | Workers blocked on NFS/SMB kernel I/O ignore SIGTERM until the syscall returns. A background thread sends SIGKILL to the process group after 5s, guaranteeing _is_running clears. |
+| 2026-03-24 | Local dest path detection via parent directory existence | In NAS mode, detect_nas_share() was mangling local absolute paths (e.g. /Users/scottie/Desktop → /Volumes/Stems/scottie/Desktop). Check os.path.exists(parent) to distinguish local paths from NAS-relative ones. |

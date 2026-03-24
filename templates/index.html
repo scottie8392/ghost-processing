@@ -424,6 +424,7 @@
       color: var(--text-dim);
     }
     .completion-stats .cs-converted { color: var(--success); font-weight: 600; }
+    .completion-stats .cs-copied    { color: var(--success); font-weight: 600; }
     .completion-stats .cs-rejected  { color: var(--error);   font-weight: 600; }
     .completion-stats .cs-skipped   { color: #666;           font-weight: 600; }
     .completion-stats .cs-sep       { color: #333; }
@@ -1156,7 +1157,7 @@
     if (m.includes('warning') || m.includes('warn'))        return 'warn';
     if (m.startsWith('converted:') || m.includes('passed')) return 'success';
     if (m.startsWith('copied:'))                             return 'success';
-    if (m.startsWith('rejected:'))                           return 'warn';
+    if (m.startsWith('rejected:'))                           return 'error';
     if (m.startsWith('checking:') || m.startsWith('analyzing:')) return 'dim';
     if (m.includes('skip') || m.includes('already processed')) return 'dim';
     if (m.startsWith('session:') || m.startsWith('found ') || m.startsWith('done:') || m.startsWith('run log:') || m.includes('dry run complete') || m.includes('verification') || m.includes('post-run')) return 'meta';
@@ -1802,8 +1803,11 @@
           // Use nasShareRoot if set, otherwise fall back to the raw subpath
           selectedPath = nasShareRoot ? nasShareRoot + '/' + subpath : subpath;
         } else {
-          // SMB: share name is the mount point folder name
-          const shareName = nasMountPoint.split('/').filter(Boolean).pop();
+          // SMB: use nasShareRoot (actual share name from the NAS), NOT the mount
+          // point folder name — macOS may append -1/-2 if a name conflicts with an
+          // existing mount (e.g. NFS "Stems" already at /Volumes/Stems → SMB "Stems"
+          // mounts at /Volumes/Stems-1, but the share name is still "Stems").
+          const shareName = nasShareRoot || nasMountPoint.split('/').filter(Boolean).pop();
           selectedPath = shareName + (subpath ? '/' + subpath : '');
         }
       }
