@@ -110,7 +110,18 @@ def save_profile(data):
         json.dump(profile, f, indent=2)
         f.flush()
         os.fsync(f.fileno())
-    os.replace(tmp_path, PROFILE_PATH)
+    try:
+        os.replace(tmp_path, PROFILE_PATH)
+    except OSError:
+        # os.replace fails on Docker bind-mounted files (EBUSY) — fall back to direct write
+        with open(PROFILE_PATH, "w") as f:
+            json.dump(profile, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
