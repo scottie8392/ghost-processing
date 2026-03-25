@@ -102,7 +102,7 @@ docker-compose up -d
   - Badge links to GitHub commits page so you can see what changed
 
   **One-click update per mode:**
-  - **Docker:** Watchtower handles it automatically — UI shows "Watchtower will apply update on next poll (up to 1hr)" when an update is detected. Optional "Check now" button that POSTs to Watchtower's HTTP API to trigger an immediate check.
+  - **Docker:** No auto-update. UI shows "Update available" badge with the one-liner to run in the NAS terminal: `git fetch origin && git reset --hard origin/main && sudo docker compose up --build -d`. Manual is fine — push code, SSH in, one command.
   - **Mac / Local:** "Update & Restart" button — runs `git fetch origin && git reset --hard origin/main` via subprocess, then `os.execv(sys.executable, [sys.executable, 'app.py'])` to restart the server in-place. Browser reconnects via SSE auto-reconnect. No Terminal needed.
   - **NAS mode (Mac):** same as Mac / Local — the app runs on the Mac, git and Python are local.
 
@@ -145,7 +145,7 @@ These cover the gap between "job ran while browser/laptop was closed" and "user 
 - [x] **docker-compose.yml missing dest volume** — resolved; output goes into mounted NAS volumes directly (`/data/stems` or `/data/show_archive`). No separate converted volume needed.
 - [x] **docker-compose.yml missing config file mount** — not actually needed. App.py builds config from the web form and passes it as a temp YAML to process_audio.py. `config.docker.yaml` is command-line only and not used by the web UI.
 - [x] **Synology deployment workflow** — documented in README: SSH in, `git clone`, `echo '{}' > profile.json && last_job.json`, `mkdir -p logs`, `sudo docker compose up --build -d`. Update one-liner: `git fetch origin && git reset --hard origin/main && sudo docker compose up --build -d`.
-- [ ] **Watchtower + GitHub Actions auto-update pipeline** — industry-standard Docker auto-update: (1) GitHub Actions workflow builds image on every push to `main` and pushes to GitHub Container Registry (ghcr.io — free, no separate account); (2) Watchtower runs as a second service in docker-compose.yml, polls GHCR on an interval (e.g. hourly), pulls new image and restarts `ghost-processing` automatically. Result: push code on Mac → NAS updates itself within the hour, no SSH required. Implementation: add `.github/workflows/docker-publish.yml`, update docker-compose.yml to pull `ghcr.io/scottie8392/ghost-processing:latest` instead of building locally, add `watchtower` service to docker-compose.yml.
+- [ ] **GitHub Actions image publish** — on every push to `main`, build image and push to `ghcr.io/scottie8392/ghost-processing:latest`. No Watchtower — Docker updates are manual via SSH one-liner. UI shows "Update available" badge when remote SHA differs from local; Docker mode displays the update command to run in the NAS terminal.
 - [x] **`save_profile()` is not atomic** — `app.py`'s `save_profile()` uses a plain `open()` + `json.dump()`, unlike the atomic tempfile+fsync+rename pattern used correctly in `process_audio.py`. Low risk for a local app but inconsistent — a crash mid-write could corrupt `profile.json`.
 - [x] **Completion counts parsed from log text** — `run_process()` in `app.py` still does incremental line-by-line counting as a live signal for the phase bar, but the final banner counts now come from parsing the `"Done: N converted[, N copied][, N silent][, N skipped] in Xs"` line emitted by `process_audio.py`'s `batch_process()` return values. This is authoritative regardless of parallel worker log ordering.
 
