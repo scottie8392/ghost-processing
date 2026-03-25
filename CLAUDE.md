@@ -18,7 +18,7 @@ A personal audio processing pipeline for a music studio. Converts stems (WAV/AIF
 
 ---
 
-## Current State (as of 2026-03-24)
+## Current State (as of 2026-03-24, Sprint 1.1 complete)
 
 The app is **feature-complete and working**. Core pipeline verified by real test runs. All known code bugs fixed. Remote configured at `origin/main`.
 
@@ -37,8 +37,8 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - Job naming from source directory basename
 - Completion banner (✓/◼/✗, converted / copied / rejected / skipped counts) — distinguishes Done / Stopped / Error; "copied" shown only when non-zero
 - Dry run mode — amber banner with ◎ icon; no files, dirs, or logs written; report-only; never persisted to profile.json
-- Log display — Python timestamp prefix stripped; colour-coded; uniform format per file: `Checking: stem.aif (96k/24b)`, `Copied: stem.aif (48k/24b, no conversion needed, peak -0.0dBFS)`, `Converted: stem.aif (96k/24b → 48k/24b, peak -0.0dBFS)`, `Rejected: stem.aif (96k/24b, silent, peak -∞dBFS)`
-- Per-file peak level (`max_dBFS`) shown on all result lines — **note: peak and silence threshold use different measurements (peak vs RMS); see BACKLOG.md 🔴**
+- Log display — Python timestamp prefix stripped; colour-coded; uniform format per file: `Checking: stem.aif (96k/24b)`, `Copied: stem.aif (48k/24b, no conversion needed, level -0.0dBFS)`, `Converted: stem.aif (96k/24b → 48k/24b, level -0.0dBFS)`, `Rejected: stem.aif (96k/24b, silent, level -∞dBFS)`
+- Per-file **peak short-time RMS** (`level`) shown on all result lines — uses same 10ms window as silence detection; directly comparable to silence threshold
 - File Review panel — live-updating lists of rejected (silent) and skipped (already in dest) files with counts
 - `last_job.json` — last job result shown as small status chip on fresh page load; status is `"done"` / `"stopped"` / `"error"`
 - macOS Notification Center alert via osascript on completion
@@ -66,7 +66,7 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - SMB end-to-end — confirmed working; share name vs mount point mismatch fixed; local dest path routing fixed; SIGKILL escalation on Stop
 - `.aif` (single-f) files correctly detected and converted
 - Ableton `.asd` sidecar files correctly ignored
-- Silence detection: truly silent file rejected; sparse/noisy content correctly kept — **calibration needed, see BACKLOG.md 🔴 (peak vs RMS mismatch)**
+- Silence detection: truly silent file rejected; sparse/noisy content correctly kept — measurement unified (Sprint 1.1): both display and detection now use peak short-time RMS
 - Dry run mode: no files written, all counts correct, amber banner, format matches real run
 - Force WAV output toggle — forces all output to .wav regardless of source format
 - Silence detection now runs on ALL files before copy or convert — silent files never reach destination regardless of format
@@ -89,8 +89,8 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 See BACKLOG.md 🟡 section. Priority: SMB end-to-end, then Docker.
 
 ### 2. Remaining 🔴 bugs
-- **BWF metadata stripped by SoX** — BEXT chunks (timecode, originator) not preserved. Fix: `bwfmetaedit` post-step.
-- **Silence detection measurement mismatch** — log displays `max_dBFS` (peak) but `detect_nonsilent` uses RMS of chunks. Must unify before trusting automated rejection. See BACKLOG.md for full details.
+- **BWF metadata stripped by SoX** — BEXT chunks (timecode, originator) not preserved. Fix: `bwfmetaedit` post-step. (Sprint 1.2)
+- ~~Silence detection measurement mismatch~~ — **fixed in Sprint 1.1**: display and detection now both use peak short-time RMS; `level` value in log is directly comparable to threshold.
 
 ### 3. Docker compose gaps (before Docker test)
 - Add dest volume to docker-compose.yml
@@ -164,9 +164,9 @@ _current_job     = None          # {"name": str, "source": str} set when a job s
 Per file in `process_file()`:
 1. Zero-byte check — reject immediately (return None)
 2. Resume check — if in `progress.json` with matching source MD5 hash and dest file exists → return `"skipped"`
-3. `soxi -r` + `soxi -b` — log `"Checking: {rel_path}  ({src_fmt})"`, then copy if already at target rate+depth (return `"copied"`)
-4. pydub silence detection — reject if entirely silent (return None)
-5. Log `"Analyzing: {rel_path}"` (real run only) — signals silence check passed; drives phase bar in UI
+3. `soxi -r` + `soxi -b` — log `"Checking: {rel_path}  ({src_fmt})"`
+4. `check_silence()` — computes peak short-time RMS (max chunk `.dBFS` using `min_non_silent_len` ms windows); reject if entirely silent (return None); log includes `level XdBFS`
+5. Already at target rate+depth → `shutil.copy2` (return `"copied"`)
 6. SoX subprocess: `sox input [-b N] [-e floating-point] output rate -v SR [dither -s]`
 7. Atomic write to `progress.json` on success; return file path (truthy → converted)
 8. Auto-verification at end of batch; run log also written to dest folder
@@ -196,7 +196,8 @@ Per file in `process_file()`:
 | Sudoers check via stderr grep | `sudo -n mount_nfs` exit code is unreliable; checking for "password is required" in stderr is accurate |
 | Fork start method for multiprocessing | Avoids lock init issues on macOS with spawn |
 | Docker platform `linux/amd64` | Synology NAS is Intel x86_64 |
-| "Analyzing:" log after silence check | Phase bar tracks completions, not worker pickups — bar fills accurately |
+| Peak short-time RMS for silence display | `check_silence()` chunks audio into `min_non_silent_len` ms windows, takes `max(chunk.dBFS)` — same metric as `detect_nonsilent` uses internally. `level` value in log is directly comparable to silence threshold. Prevents false-positive on single transient peaks (old `max_dBFS`) while correctly keeping sparse content like a single rimshot. |
+| `min_silence_len` hardcoded, removed from UI | pydub gap-bridging parameter is irrelevant for binary keep/reject decisions. Hardcoded to 200ms; only `silence_thresh` and `min_non_silent_len` exposed in Advanced panel. |
 | `_stop_requested` flag for Stop status | `/stop` sets flag before killpg; `run_process` reads it after wait() to write `"stopped"` vs `"error"` — can't use returncode alone since both are non-zero |
 | `output_suffix(rate, depth)` helper | Dest dirs and filenames include both rate and depth e.g. `48k-24b`; prevents collisions across bit depths and makes skip logic unambiguous |
 | 32f AIF/AIFF → .wav output | AIFF can't encode float; SoX silently falls back to 32i. Force .wav for 32f+AIF sources. Same ext swap mirrored in both verifiers. |

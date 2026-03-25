@@ -217,17 +217,35 @@ def output_suffix(target_rate, bit_depth):
 
 def check_silence(audio_file, silence_thresh, min_silence_len, min_non_silent_len):
     """
-    Returns (is_silent, peak_db).
-    peak_db is a float (dBFS), or None on decode error.
-    Loads audio once and returns both results to avoid a second file read.
+    Returns (is_silent, level_db).
+
+    level_db is the peak short-time RMS in dBFS: the loudest chunk's RMS level
+    using the same window size (min_non_silent_len ms) as detect_nonsilent.
+    Directly comparable to silence_thresh — both use RMS energy.
+
+    Returns -inf for a truly silent file, None on decode error.
     """
     try:
         audio = AudioSegment.from_file(audio_file)
-        peak_db = audio.max_dBFS  # -inf for truly silent files
         non_silent = silence.detect_nonsilent(
             audio, min_silence_len=min_non_silent_len, silence_thresh=silence_thresh
         )
-        return not bool(non_silent), peak_db
+
+        # Peak short-time RMS: chunk by min_non_silent_len ms, take loudest chunk's dBFS.
+        # Matches the detection window exactly — level_db is directly comparable to silence_thresh.
+        audio_len = len(audio)  # ms
+        if audio_len == 0:
+            level_db = float("-inf")
+        else:
+            frame_ms = max(1, min(min_non_silent_len, audio_len))
+            n_frames = audio_len // frame_ms
+            frames = [audio[i * frame_ms:(i + 1) * frame_ms] for i in range(n_frames)]
+            remainder = audio[n_frames * frame_ms:]
+            if len(remainder) > 0:
+                frames.append(remainder)
+            level_db = max(f.dBFS for f in frames) if frames else float("-inf")
+
+        return not bool(non_silent), level_db
     except CouldntDecodeError as e:
         logging.error(f"Decode error for {audio_file}: {e}")
         return False, None  # Treat as non-silent to avoid false rejects
@@ -367,15 +385,15 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
 
             # Silence check runs on ALL files before copy or convert.
             # A silent file never reaches the destination regardless of format.
-            is_silent, peak_db = check_silence(
+            is_silent, level_db = check_silence(
                 file_path,
                 config["silence_thresh"],
                 config["min_silence_len"],
                 config["min_non_silent_len"],
             )
-            peak_str = f"  peak {peak_db:.1f}dBFS" if peak_db is not None and peak_db != float("-inf") else "  peak -∞dBFS" if peak_db is not None else ""
+            level_str = f"  level {level_db:.1f}dBFS" if level_db is not None and level_db != float("-inf") else "  level -∞dBFS" if level_db is not None else ""
             if is_silent:
-                logging.info(f"Rejected: {rel_path}  ({src_fmt}, silent,{peak_str})")
+                logging.info(f"Rejected: {rel_path}  ({src_fmt}, silent,{level_str})")
                 if not config.get("dry_run"):
                     append_log(
                         rejects_log,
@@ -387,7 +405,7 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
             # Already at target rate and bit depth — copy, don't resample
             if already_right_rate and already_right_depth:
                 if config["dry_run"]:
-                    logging.info(f"[DRY RUN] Would copy: {rel_path}  ({src_fmt}, no conversion needed,{peak_str})")
+                    logging.info(f"[DRY RUN] Would copy: {rel_path}  ({src_fmt}, no conversion needed,{level_str})")
                     return "copied"
                 shutil.copy2(file_path, dest_path)
                 src_hash = file_hash(file_path)
@@ -396,7 +414,7 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                     {rel_path: {"status": "copied", "source_hash": src_hash, "timestamp": str(datetime.now())}},
                     is_list=False,
                 )
-                logging.info(f"Copied: {rel_path}  ({src_fmt}, no conversion needed,{peak_str})")
+                logging.info(f"Copied: {rel_path}  ({src_fmt}, no conversion needed,{level_str})")
                 return "copied"
 
             if resample_audio(file_path, dest_path, target_rate, bit_depth, config["dry_run"]):
@@ -408,9 +426,9 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                         is_list=False,
                     )
                 if config["dry_run"]:
-                    logging.info(f"[DRY RUN] Would convert: {rel_path}  ({src_fmt} → {dest_fmt},{peak_str})")
+                    logging.info(f"[DRY RUN] Would convert: {rel_path}  ({src_fmt} → {dest_fmt},{level_str})")
                 else:
-                    logging.info(f"Converted: {rel_path}  ({src_fmt} → {dest_fmt},{peak_str})")
+                    logging.info(f"Converted: {rel_path}  ({src_fmt} → {dest_fmt},{level_str})")
                 return file_path
             return None
 
