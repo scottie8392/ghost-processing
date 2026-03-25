@@ -32,7 +32,7 @@ You point the tool at a folder of stems. For each audio file it finds:
 2. **Reject** if the file is entirely silent or zero bytes
 3. **Convert** everything else — 96kHz → 48kHz using SoX with shaped dithering
 
-Output lands in a new folder next to your source, named after the session with a `-48` suffix. Example:
+Output lands in a new folder next to your source, named after the session with the target rate and bit depth appended. Example:
 
 ```
 PT Exports/
@@ -42,10 +42,10 @@ PT Exports/
     └── Vocals.wav
 
 _Ghost Tracks/
-└── Boston-48/            ← created automatically
-    ├── Drums-48.wav
-    ├── Bass-48.wav
-    └── Vocals-48.wav
+└── Boston-48k-24b/       ← created automatically
+    ├── Drums-48k-24b.wav
+    ├── Bass-48k-24b.wav
+    └── Vocals-48k-24b.wav
 ```
 
 Progress is tracked in a `progress.json` file in the output folder, so interrupted runs pick up where they left off.
@@ -110,46 +110,54 @@ Subsequent launches are instant — just double-click `start.command`.
 
 This runs the app permanently on your NAS. You access the UI from any browser on your network at `http://YOUR_NAS_IP:5001`.
 
-### Step 1 — Copy the project to your NAS
+### Step 1 — SSH into your NAS and clone the repo
 
-Copy the entire `ghost-processing` folder to your NAS. A good location is somewhere in your home volume, e.g. `/volume1/homes/admin/ghost-processing`.
-
-You can do this via the Synology File Station, or with `scp` from Terminal:
 ```bash
-scp -r ~/Documents/projects/ghost-processing admin@10.11.24.24:/volume1/homes/admin/
+ssh admin@YOUR_NAS_IP
+cd /volume1/docker        # or wherever you keep appdata
+git clone https://github.com/scottie8392/ghost-processing.git
+cd ghost-processing
+echo '{}' > profile.json
+echo '{}' > last_job.json
+mkdir -p logs
 ```
 
 ### Step 2 — Edit docker-compose.yml
 
-Open `docker-compose.yml` in a text editor and update the volume path to match your NAS layout:
+Update the volume paths to match your NAS layout:
 
 ```yaml
 volumes:
-  - /volume1/Stems:/data/stems    # ← change /volume1/Stems to your actual Stems folder
+  - /volume1/Stems:/data/stems    # ← change to your actual audio folder
   - ./logs:/app/logs
   - ./profile.json:/app/profile.json
+  - ./last_job.json:/app/last_job.json
 ```
 
 The left side of each `:` is the path on your NAS. The right side is what the app sees inside the container — leave those as-is.
 
-### Step 3 — SSH into your NAS and start the container
+> **Paths with spaces** must be quoted: `- "/volume1/Show Archive:/data/show_archive"`
+
+### Step 3 — Build and start the container
 
 ```bash
-ssh admin@10.11.24.24
-cd /volume1/homes/admin/ghost-processing
-docker-compose up -d
+sudo docker compose up --build -d
 ```
 
-The `-d` flag runs it in the background. It will restart automatically if the NAS reboots.
+The `-d` flag runs it in the background. It restarts automatically if the NAS reboots.
 
 ### Step 4 — Open the UI
 
-From any device on your network, open a browser and go to:
+From any device on your network:
 ```
-http://10.11.24.24:5001
+http://YOUR_NAS_IP:5001
 ```
 
-Replace `10.11.24.24` with your NAS IP address.
+### Updating to the latest version
+
+```bash
+git fetch origin && git reset --hard origin/main && sudo docker compose up --build -d
+```
 
 ---
 
@@ -201,7 +209,7 @@ Enter container-internal paths (e.g. `/data/stems/_Ghost Tracks/PT Exports/Bosto
 
 **Bit Depth** — output bit depth. Default is 24-bit. Options: 16-bit, 24-bit, 32-bit, 32f (float).
 
-**Destination Base** — where output is created. Leave blank to default to the folder next to your source. The app creates a new subfolder named after your session with `-48` appended — you don't need to create anything manually.
+**Destination Base** — where output is created. Leave blank to default to the folder next to your source. The app creates a new subfolder named after your session with the target rate and bit depth appended (e.g. `Boston-48k-24b`) — you don't need to create anything manually.
 
 **Workers** — parallel conversions. Start at `6`. Lower if the NAS feels sluggish during a run; raise if your Mac is idle and you want it to go faster.
 
@@ -266,16 +274,16 @@ Then a session at `/volume1/Stems/_Ghost Tracks/PT Exports/Boston` on the NAS be
 
 ### Output folder
 
-Given a source at `.../PT Exports/Boston`, the output will be at `.../PT Exports/../Boston-48/` — specifically, a `Boston-48` folder created inside your Destination Base.
+Given a source at `.../PT Exports/Boston`, the output will be at `.../PT Exports/Boston-48k-24b/` — a folder created inside your Destination Base named after the session with the target rate and bit depth appended.
 
 ### File naming
 
-Each converted file gets `-48` appended before the extension:
+Each converted file gets the target rate and bit depth appended before the extension:
 
 ```
-Drums.wav       →   Drums-48.wav
-Vocals.aiff     →   Vocals-48.aiff
-Bass Stem.wav   →   Bass Stem-48.wav
+Drums.wav       →   Drums-48k-24b.wav
+Vocals.aiff     →   Vocals-48k-24b.wav
+Bass Stem.wav   →   Bass Stem-48k-24b.wav
 ```
 
 Folder structure is preserved exactly.
@@ -435,9 +443,8 @@ watch_mode: false       # true = monitor folder for new files continuously
 verbose: false          # true = show every file in logs
 
 target_sample_rate: 48000   # Output sample rate in Hz
-silence_thresh: -50.0       # Files quieter than this (dB) are rejected
-min_silence_len: 200        # Min ms for a chunk to count as silence
-min_non_silent_len: 10      # Min ms of audio needed to keep a file
+silence_thresh: -50.0       # Files quieter than this (short-time RMS dB) are rejected
+min_non_silent_len: 10      # Min ms window — any chunk above threshold keeps the file
 
 max_workers: 6              # Parallel processing jobs
 
