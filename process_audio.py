@@ -614,25 +614,31 @@ def run_verification(config, dest_dir, progress_log, rejects_log):
 # L/R stereo combining
 # ---------------------------------------------------------------------------
 
-def find_lr_pairs(dest_dir, suffix):
+def find_lr_pairs(scan_dir, suffix, dry_run=False):
     """
-    Walk dest_dir and find matched L/R mono pairs produced by Pro Tools.
-    Source naming convention: 'Stem Name L.wav' / 'Stem Name R.wav'
-    After conversion: 'Stem Name L-{suffix}.wav' / 'Stem Name R-{suffix}.wav'
-    Returns (pairs, unpaired) where pairs = [(left, right, merged), ...].
-    """
-    left_files = {}  # stem+dir → left_path
-    right_files = {}
+    Walk scan_dir and find matched L/R mono pairs produced by Pro Tools.
 
-    for root, _, files in os.walk(dest_dir):
+    Real run: scans dest_dir for converted files ending in ' L-{suffix}.ext'
+    Dry run:  scans source_dir for original files ending in ' L.ext'
+              (nothing has been written to dest yet)
+
+    Returns (pairs, unpaired) where pairs = [(left, right, merged_name), ...].
+    """
+    left_files = {}
+    right_files = {}
+    lr_suffix = f"-{suffix}" if not dry_run else ""
+
+    for root, _, files in os.walk(scan_dir):
         for fname in files:
+            if not is_audio_file(fname):
+                continue
             name, ext = os.path.splitext(fname)
-            if name.endswith(f" L-{suffix}"):
-                stem = name[: -len(f" L-{suffix}")]
+            if name.endswith(f" L{lr_suffix}"):
+                stem = name[: -len(f" L{lr_suffix}")]
                 key = (root, stem, ext)
                 left_files[key] = os.path.join(root, fname)
-            elif name.endswith(f" R-{suffix}"):
-                stem = name[: -len(f" R-{suffix}")]
+            elif name.endswith(f" R{lr_suffix}"):
+                stem = name[: -len(f" R{lr_suffix}")]
                 key = (root, stem, ext)
                 right_files[key] = os.path.join(root, fname)
 
@@ -642,7 +648,7 @@ def find_lr_pairs(dest_dir, suffix):
     for key in all_keys:
         root, stem, ext = key
         if key in left_files and key in right_files:
-            merged = os.path.join(root, f"{stem}-{suffix}{ext}")
+            merged = os.path.join(root, f"{stem}-{suffix}{ext}") if not dry_run else f"{stem}-{suffix}{ext}"
             pairs.append((left_files[key], right_files[key], merged))
         elif key in left_files:
             unpaired.append(left_files[key])
@@ -662,7 +668,8 @@ def merge_lr_pairs(dest_dir, config):
     suffix      = output_suffix(target_rate, bit_depth)
     dry_run     = config.get("dry_run", False)
 
-    pairs, unpaired = find_lr_pairs(dest_dir, suffix)
+    scan_dir = config.get("source_dir", dest_dir) if dry_run else dest_dir
+    pairs, unpaired = find_lr_pairs(scan_dir, suffix, dry_run=dry_run)
     if not pairs and not unpaired:
         return 0
 
@@ -670,11 +677,12 @@ def merge_lr_pairs(dest_dir, config):
     merged_count = 0
 
     for left, right, merged in pairs:
-        rel = os.path.relpath(merged, dest_dir)
+        merged_name = merged if dry_run else os.path.basename(merged)
+        rel = merged if dry_run else os.path.relpath(merged, dest_dir)
         if dry_run:
             logging.info(
                 f"[DRY RUN] Would merge: {os.path.basename(left)} + "
-                f"{os.path.basename(right)} → {os.path.basename(merged)}"
+                f"{os.path.basename(right)} → {merged_name}"
             )
             merged_count += 1
             continue
