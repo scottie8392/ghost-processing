@@ -123,6 +123,7 @@ These cover the gap between "job ran while browser/laptop was closed" and "user 
 - [ ] **Subfolder flattening** — tick box to output all converted files into a single flat directory, stripping the source subdirectory structure. Useful when the session has nested folders (e.g. `Drums/OH/`, `Guitars/DI/`) but the delivery needs a flat folder of stems. Collision handling needed: if two files in different subdirs share a filename, append the parent folder name to disambiguate.
 - [ ] **Folder exclude patterns** — option to skip subdirectories by name pattern (e.g. "Bounce", "Reference", "Archive"). Avoids accidentally converting non-stem files mixed into the session folder.
 - [ ] **Multiple source dirs** — accept a list of source paths in one run rather than one at a time.
+- [ ] **Source folder file preview** — once a valid source path is entered, show a collapsible file tree of the audio files found inside (including nested subdirectories). Lets you confirm you're pointing at the right session without leaving the app. Uses the existing `/browse` endpoint or a new `/scan` endpoint that returns only audio files. Shows count per subfolder, total file count, and file names — mirrors what the log will show when the job runs.
 
 ### Audio Quality
 - [ ] **AIFF output option** — some studios deliver stems as AIFF. Add an output format dropdown (WAV / AIFF) alongside sample rate and bit depth.
