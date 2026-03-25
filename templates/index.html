@@ -821,6 +821,11 @@
         <input type="checkbox" id="force_wav" style="margin-top:5px;">
         <div class="hint">Output all files as .wav regardless of source format.</div>
       </div>
+      <div class="field">
+        <label class="field-label" for="combine_lr">Combine L/R Pairs</label>
+        <input type="checkbox" id="combine_lr" style="margin-top:5px;">
+        <div class="hint">Merge Pro Tools mono L/R pairs (e.g. <code>Kick L.wav</code> + <code>Kick R.wav</code>) into a single stereo file after conversion. Unpaired files pass through unchanged.</div>
+      </div>
     </div>
 
     <!-- Advanced -->
@@ -1122,6 +1127,7 @@
       max_workers:        parseInt(document.getElementById('max_workers').value) || 6,
       dry_run:            document.getElementById('dry_run').checked,
       force_wav:          document.getElementById('force_wav').checked,
+      combine_lr:         document.getElementById('combine_lr').checked,
       verbose:            document.getElementById('verbose').checked,
       target_sample_rate: parseInt(document.getElementById('target_sample_rate').value) || 48000,
       bit_depth:          document.getElementById('bit_depth').value,
@@ -1185,10 +1191,11 @@
     if (m.includes('warning') || m.includes('warn'))        return 'warn';
     if (m.startsWith('converted:') || m.includes('passed')) return 'success';
     if (m.startsWith('copied:'))                             return 'success';
+    if (m.startsWith('merged:'))                             return 'success';
     if (m.startsWith('rejected:'))                           return 'error';
     if (m.startsWith('checking:') || m.startsWith('analyzing:')) return 'dim';
     if (m.includes('skip') || m.includes('already processed')) return 'dim';
-    if (m.startsWith('session:') || m.startsWith('found ') || m.startsWith('done:') || m.startsWith('run log:') || m.includes('dry run complete') || m.includes('verification') || m.includes('post-run')) return 'meta';
+    if (m.startsWith('session:') || m.startsWith('found ') || m.startsWith('done:') || m.startsWith('run log:') || m.includes('dry run complete') || m.includes('verification') || m.includes('post-run') || m.includes('l/r combining') || m.startsWith('unpaired l/r')) return 'meta';
     return '';
   }
 
@@ -1898,6 +1905,7 @@
       setVal('max_workers',  p.max_workers  != null ? p.max_workers : 6);
       // dry_run intentionally not restored — should always default to off
       setChk('force_wav',    p.force_wav);
+      setChk('combine_lr',   p.combine_lr);
       setChk('verbose',      p.verbose);
 
       setSel('target_sample_rate', p.target_sample_rate != null ? p.target_sample_rate : 48000);

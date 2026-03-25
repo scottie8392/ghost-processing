@@ -611,6 +611,99 @@ def run_verification(config, dest_dir, progress_log, rejects_log):
 
 
 # ---------------------------------------------------------------------------
+# L/R stereo combining
+# ---------------------------------------------------------------------------
+
+def find_lr_pairs(dest_dir, suffix):
+    """
+    Walk dest_dir and find matched L/R mono pairs produced by Pro Tools.
+    Source naming convention: 'Stem Name L.wav' / 'Stem Name R.wav'
+    After conversion: 'Stem Name L-{suffix}.wav' / 'Stem Name R-{suffix}.wav'
+    Returns (pairs, unpaired) where pairs = [(left, right, merged), ...].
+    """
+    left_files = {}  # stem+dir → left_path
+    right_files = {}
+
+    for root, _, files in os.walk(dest_dir):
+        for fname in files:
+            name, ext = os.path.splitext(fname)
+            if name.endswith(f" L-{suffix}"):
+                stem = name[: -len(f" L-{suffix}")]
+                key = (root, stem, ext)
+                left_files[key] = os.path.join(root, fname)
+            elif name.endswith(f" R-{suffix}"):
+                stem = name[: -len(f" R-{suffix}")]
+                key = (root, stem, ext)
+                right_files[key] = os.path.join(root, fname)
+
+    pairs = []
+    unpaired = []
+    all_keys = set(left_files) | set(right_files)
+    for key in all_keys:
+        root, stem, ext = key
+        if key in left_files and key in right_files:
+            merged = os.path.join(root, f"{stem}-{suffix}{ext}")
+            pairs.append((left_files[key], right_files[key], merged))
+        elif key in left_files:
+            unpaired.append(left_files[key])
+        else:
+            unpaired.append(right_files[key])
+
+    return pairs, unpaired
+
+
+def merge_lr_pairs(dest_dir, config):
+    """Merge matched L/R mono pairs into stereo files using SoX. Runs after verification."""
+    if not config.get("combine_lr"):
+        return 0
+
+    target_rate = config.get("target_sample_rate", 48000)
+    bit_depth   = config.get("bit_depth", 24)
+    suffix      = output_suffix(target_rate, bit_depth)
+    dry_run     = config.get("dry_run", False)
+
+    pairs, unpaired = find_lr_pairs(dest_dir, suffix)
+    if not pairs and not unpaired:
+        return 0
+
+    logging.info(f"--- L/R combining: {len(pairs)} pair(s) ---")
+    merged_count = 0
+
+    for left, right, merged in pairs:
+        rel = os.path.relpath(merged, dest_dir)
+        if dry_run:
+            logging.info(
+                f"[DRY RUN] Would merge: {os.path.basename(left)} + "
+                f"{os.path.basename(right)} → {os.path.basename(merged)}"
+            )
+            merged_count += 1
+            continue
+        if os.path.exists(merged):
+            logging.info(f"Merge already done, skipping: {rel}")
+            merged_count += 1
+            continue
+        try:
+            result = subprocess.run(
+                ["sox", "-M", left, right, merged],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                os.remove(left)
+                os.remove(right)
+                logging.info(f"Merged: {rel}")
+                merged_count += 1
+            else:
+                logging.error(f"Merge failed: {rel} — {result.stderr.strip()}")
+        except Exception as e:
+            logging.error(f"Merge error: {rel} — {e}")
+
+    for path in unpaired:
+        logging.warning(f"Unpaired L/R — no matching partner: {os.path.basename(path)}")
+
+    return merged_count
+
+
+# ---------------------------------------------------------------------------
 # Watch mode
 # ---------------------------------------------------------------------------
 
@@ -742,9 +835,11 @@ def main():
 
         # Auto-verification after batch (skipped in dry run — nothing was written)
         if config.get("dry_run"):
+            merge_lr_pairs(dest_dir, config)
             logging.info("Dry run complete — no files written.")
         else:
             unprocessed, missing = run_verification(config, dest_dir, progress_log, rejects_log)
+            merge_lr_pairs(dest_dir, config)
             if unprocessed > 0 or missing > 0:
                 print(f"WARNING: {unprocessed} unprocessed, {missing} missing dest files.")
                 print("Run verify_audio.py for a full report.")
