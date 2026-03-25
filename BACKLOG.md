@@ -88,11 +88,23 @@ docker-compose up -d
 - [ ] **Dest file integrity check on resume** — the resume logic currently checks that the dest file exists and the source hash matches, but does not verify the dest file itself. A truncated write, disk error, or corruption after conversion would be silently skipped on re-run. Fix: store a `dest_hash` in `progress.json` alongside `source_hash` at write time, and verify it on resume — if it doesn't match, re-convert. Also makes `verify_audio.py` more useful since it can flag corrupt outputs without needing the source.
 - [ ] **Config validation before run** — validate all values (sample rate, bit depth, silence threshold) in `app.py` before spawning the subprocess, with clear error messages in the UI rather than a crash in the log.
 
-### Version & Updates
-- [ ] **Version display in UI** — show the current git commit SHA (short) and date in the UI footer. Read via `git rev-parse --short HEAD` on startup, expose via a `/version` endpoint. Low effort, immediately useful for knowing what's deployed — especially on the NAS where you can't tell just by looking.
-- [ ] **Update check on boot** — on startup, hit the GitHub API (`/repos/scottie8392/ghost-processing/commits/main`) and compare the remote SHA to local HEAD. If they differ, show a small "Update available" badge in the UI. No auth needed for a public repo. Gracefully silent if offline.
-- [ ] **One-click update (Mac / Local mode)** — "Pull & Restart" button in settings. Runs `git fetch origin && git reset --hard origin/main`, then restarts the Flask server. Straightforward on Mac since the app runs directly on the host.
-- [ ] **One-click update (Docker mode)** — significantly harder. The container can't rebuild itself. Options: (1) mount `/var/run/docker.sock` into the container and shell out to `docker compose up --build -d` — works but gives the container host-level Docker access; (2) use Watchtower (separate container that watches for image updates); (3) keep it manual with the documented one-liner. Needs a decision before implementing.
+### Version & Updates (Sprint 3 — next up)
+- [ ] **Sprint 3: Auto-update pipeline + version UI** — combines version display, update check, and one-click update across all three modes. Single sprint, all delivered together.
+
+  **Pipeline (GitHub Actions + GHCR):**
+  - Add `.github/workflows/docker-publish.yml` — on every push to `main`, build image and push to `ghcr.io/scottie8392/ghost-processing:latest` with the short commit SHA as a secondary tag (`:sha-abc1234`)
+  - Update `docker-compose.yml` to pull `ghcr.io/scottie8392/ghost-processing:latest` instead of building locally — first-time setup becomes `git clone + docker compose up -d` (no `--build`)
+  - Add Watchtower service to `docker-compose.yml` — polls GHCR hourly, pulls new image, restarts `ghost-processing` automatically. Zero SSH required after setup.
+
+  **Version display:**
+  - `/version` endpoint returns `{"sha": "abc1234", "date": "2026-03-25", "remote_sha": "..."}` — local SHA read from `git rev-parse --short HEAD` (or a `VERSION` file baked in at build time for Docker where git isn't present); remote SHA fetched from GitHub API on boot
+  - UI footer shows current version SHA + "Up to date" or "Update available" badge
+  - Badge links to GitHub commits page so you can see what changed
+
+  **One-click update per mode:**
+  - **Docker:** Watchtower handles it automatically — UI shows "Watchtower will apply update on next poll (up to 1hr)" when an update is detected. Optional "Check now" button that POSTs to Watchtower's HTTP API to trigger an immediate check.
+  - **Mac / Local:** "Update & Restart" button — runs `git fetch origin && git reset --hard origin/main` via subprocess, then `os.execv(sys.executable, [sys.executable, 'app.py'])` to restart the server in-place. Browser reconnects via SSE auto-reconnect. No Terminal needed.
+  - **NAS mode (Mac):** same as Mac / Local — the app runs on the Mac, git and Python are local.
 
 ### Reconnection & Job State Awareness
 These cover the gap between "job ran while browser/laptop was closed" and "user knows what happened when they reopen the app."
