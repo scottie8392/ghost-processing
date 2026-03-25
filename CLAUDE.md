@@ -18,7 +18,7 @@ A personal audio processing pipeline for a music studio. Converts stems (WAV/AIF
 
 ---
 
-## Current State (as of 2026-03-24, Sprint 1.1 + 1.2 complete)
+## Current State (as of 2026-03-25, Sprint 1.1 + 1.2 + Sprint 2 complete)
 
 The app is **feature-complete and working**. Core pipeline verified by real test runs. All known code bugs fixed. Remote configured at `origin/main`.
 
@@ -78,23 +78,22 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 
 ### Not yet tested:
 - NFS/SMB network drop mid-run
-- Docker end-to-end
 - Watch mode
+
+### Verified by Sprint 2:
+- Docker end-to-end — DS1821+ (AMD Ryzen V1500B, 4GB RAM), 3 workers, real session folder, 48kHz/24-bit. Verification passed — all files accounted for.
+- Docker dry run — correct counts, amber banner, no files written
+- docker-compose.yml volume mappings — source + show archive shares with spaces in path
+- Docker path mapping display — docker-compose.yml baked into image via Dockerfile; `/docker-mappings` endpoint resolves container → host paths correctly
+- save_profile() on Docker bind-mounted files — os.replace() EBUSY fallback to direct write
+- Recommended workers for DS1821+ (4GB RAM): **3** — 6 caused OOM kills
 
 ---
 
-## Immediate Next Steps (in order)
+## Immediate Next Steps
 
-### 1. Remaining test checklist
-See BACKLOG.md 🟡 section. Priority: SMB end-to-end, then Docker.
-
-### 2. Remaining 🔴 bugs
-- ~~BWF metadata stripped by SoX~~ — **fixed in Sprint 1.2**: pure Python RIFF chunk copy preserves BEXT (timecode, originator, session name) from source WAV to dest WAV after SoX conversion.
-- ~~Silence detection measurement mismatch~~ — **fixed in Sprint 1.1**: display and detection now both use peak short-time RMS; `level` value in log is directly comparable to threshold.
-
-### 3. Docker compose gaps (before Docker test)
-- Add dest volume to docker-compose.yml
-- Mount config.docker.yaml into container
+### Sprint 3 — see BACKLOG.md for candidates
+All 🔴 bugs fixed. Focus shifts to workflow features and quality-of-life improvements.
 
 ---
 
@@ -233,5 +232,5 @@ python verify_audio.py --config config.local.yaml
 ## Git State
 
 - Branch: `main`
-- Remote: `origin/main` configured
-- Working tree: uncommitted changes from 2026-03-24 session
+- Remote: `origin/main` — `https://github.com/scottie8392/ghost-processing`
+- Working tree: clean as of 2026-03-25 Sprint 2 completion
