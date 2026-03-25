@@ -8,7 +8,7 @@ services:
     volumes:
       # Source audio — update paths to match your NAS layout
       - /volume1/Stems:/data/stems           # Source stems (read)
-      - /volume1/Converted:/data/converted   # Converted output (write)
+      - "/volume1/Show Archive:/data/show_archive"   # Show Archive (read/write)
       # Logs and saved settings persist on host
       - ./logs:/app/logs
       - ./profile.json:/app/profile.json     # Create this file first: echo '{}' > profile.json
