@@ -137,6 +137,9 @@ These cover the gap between "job ran while browser/laptop was closed" and "user 
 - [x] **`save_profile()` is not atomic** — `app.py`'s `save_profile()` uses a plain `open()` + `json.dump()`, unlike the atomic tempfile+fsync+rename pattern used correctly in `process_audio.py`. Low risk for a local app but inconsistent — a crash mid-write could corrupt `profile.json`.
 - [x] **Completion counts parsed from log text** — `run_process()` in `app.py` still does incremental line-by-line counting as a live signal for the phase bar, but the final banner counts now come from parsing the `"Done: N converted[, N copied][, N silent][, N skipped] in Xs"` line emitted by `process_audio.py`'s `batch_process()` return values. This is authoritative regardless of parallel worker log ordering.
 
+### Distributed Processing (Future / Big Feature)
+- [ ] **Multi-node processing farm** — run a fleet of ghost-processing containers across multiple machines on the same Tailscale network. One node acts as master (runs the web UI, owns the job queue), the rest are workers (headless, receive file assignments). All nodes mount the same NAS share (NFS or SMB) so they can read source files and write output directly. Master splits the file list across available workers, collects results, and aggregates counts/logs into a single completion banner. Workers register themselves with the master on startup. Failure handling: if a worker drops mid-job, master reassigns its remaining files to other workers. Architecture options: (1) simple REST — master exposes a `/claim` endpoint, workers poll for work; (2) message queue (Redis or lightweight NATS) — more robust for large fleets. All nodes must have network access to the master's share and identical SoX/FFmpeg versions. Tailscale handles the networking layer; no VPN config needed beyond `tailscale up`.
+
 ---
 
 ## ✅ Done

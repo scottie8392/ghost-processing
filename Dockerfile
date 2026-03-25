@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY process_audio.py verify_audio.py app.py ./
 COPY templates/ templates/
+COPY docker-compose.yml ./
 
 # Web UI — accessible at http://NAS_IP:5001
 CMD ["python", "app.py"]
