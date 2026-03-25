@@ -5,11 +5,13 @@ services:
     ports:
       - "5001:5001"         # Access web UI at http://NAS_IP:5001
     volumes:
-      # Source audio — update these paths to match your NAS layout
-      - /volume1/Stems:/data/stems           # Mount entire Stems volume
+      # Source audio — update paths to match your NAS layout
+      - /volume1/Stems:/data/stems           # Source stems (read)
+      - /volume1/Converted:/data/converted   # Converted output (write)
       # Logs and saved settings persist on host
       - ./logs:/app/logs
-      - ./profile.json:/app/profile.json
+      - ./profile.json:/app/profile.json     # Create this file first: echo '{}' > profile.json
+      - ./last_job.json:/app/last_job.json   # Create this file first: echo '{}' > last_job.json
     environment:
       - HOST=0.0.0.0
       - PORT=5001
