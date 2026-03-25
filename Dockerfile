@@ -15,5 +15,9 @@ COPY process_audio.py verify_audio.py app.py ./
 COPY templates/ templates/
 COPY docker-compose.yml ./
 
+# Bake git SHA into image for version display
+ARG GIT_SHA=unknown
+RUN echo ${GIT_SHA} > /app/VERSION
+
 # Web UI — accessible at http://NAS_IP:5001
 CMD ["python", "app.py"]

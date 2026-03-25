@@ -21,6 +21,8 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
 
 import yaml
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
@@ -31,10 +33,56 @@ log.setLevel(logging.ERROR)
 
 app = Flask(__name__)
 
-BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
 PROCESS_SCRIPT = os.path.join(BASE_DIR, "process_audio.py")
 PROFILE_PATH   = os.path.join(BASE_DIR, "profile.json")
 LAST_JOB_PATH  = os.path.join(BASE_DIR, "last_job.json")
+VERSION_FILE   = os.path.join(BASE_DIR, "VERSION")
+
+# Docker detection — /.dockerenv exists in all Docker containers
+_is_docker = os.path.exists("/.dockerenv")
+
+# Version cache — populated at startup
+_version_cache = {"local": None, "remote": None}
+
+
+def _get_local_sha():
+    """Read local SHA from VERSION file (Docker) or git (Mac/local)."""
+    if os.path.exists(VERSION_FILE):
+        try:
+            sha = open(VERSION_FILE).read().strip()
+            if sha and sha not in ("unknown", "dev", ""):
+                return sha[:7]
+        except Exception:
+            pass
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, cwd=BASE_DIR, timeout=5
+        )
+        return r.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _fetch_remote_sha():
+    """Fetch latest main commit SHA from GitHub API. Returns None on failure."""
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/repos/scottie8392/ghost-processing/commits/main",
+            headers={"User-Agent": "ghost-processing-version-check"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return json.loads(resp.read())["sha"][:7]
+    except Exception:
+        return None
+
+
+def _init_version():
+    _version_cache["local"] = _get_local_sha()
+    _version_cache["remote"] = _fetch_remote_sha()
+
+threading.Thread(target=_init_version, daemon=True).start()
 
 DEFAULT_PROFILE = {
     "source_dir": "",
@@ -808,6 +856,41 @@ def stream():
         mimetype="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ---------------------------------------------------------------------------
+# Version & Update
+# ---------------------------------------------------------------------------
+
+@app.route("/version")
+def version():
+    local  = _version_cache["local"] or "unknown"
+    remote = _version_cache["remote"]
+    up_to_date = (remote is None) or (local == "unknown") or (local == remote)
+    return jsonify({
+        "local_sha":  local,
+        "remote_sha": remote,
+        "up_to_date": up_to_date,
+        "is_docker":  _is_docker,
+    })
+
+
+@app.route("/update", methods=["POST"])
+def update():
+    if _is_running:
+        return jsonify({"error": "Cannot update while a job is running"}), 400
+    if _is_docker:
+        return jsonify({
+            "docker":  True,
+            "command": "git fetch origin && git reset --hard origin/main && git rev-parse --short HEAD > VERSION && sudo docker compose up --build -d",
+        })
+    try:
+        subprocess.run(["git", "fetch", "origin"],              cwd=BASE_DIR, capture_output=True, timeout=30, check=True)
+        subprocess.run(["git", "reset", "--hard", "origin/main"], cwd=BASE_DIR, capture_output=True, timeout=30, check=True)
+    except subprocess.CalledProcessError as e:
+        return jsonify({"error": f"Git update failed: {e}"}), 500
+    # Restart server in-place — browser reconnects via SSE auto-reconnect
+    os.execv(sys.executable, [sys.executable, os.path.abspath(__file__)])
 
 
 # ---------------------------------------------------------------------------

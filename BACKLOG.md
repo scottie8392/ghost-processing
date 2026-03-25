@@ -88,8 +88,8 @@ docker-compose up -d
 - [ ] **Dest file integrity check on resume** — the resume logic currently checks that the dest file exists and the source hash matches, but does not verify the dest file itself. A truncated write, disk error, or corruption after conversion would be silently skipped on re-run. Fix: store a `dest_hash` in `progress.json` alongside `source_hash` at write time, and verify it on resume — if it doesn't match, re-convert. Also makes `verify_audio.py` more useful since it can flag corrupt outputs without needing the source.
 - [ ] **Config validation before run** — validate all values (sample rate, bit depth, silence threshold) in `app.py` before spawning the subprocess, with clear error messages in the UI rather than a crash in the log.
 
-### Version & Updates (Sprint 3 — next up)
-- [ ] **Sprint 3: Auto-update pipeline + version UI** — combines version display, update check, and one-click update across all three modes. Single sprint, all delivered together.
+### Version & Updates
+- [x] **Sprint 3: Auto-update pipeline + version UI** — combines version display, update check, and one-click update across all three modes. Single sprint, all delivered together.
 
   **Pipeline (GitHub Actions + GHCR):**
   - Add `.github/workflows/docker-publish.yml` — on every push to `main`, build image and push to `ghcr.io/scottie8392/ghost-processing:latest` with the short commit SHA as a secondary tag (`:sha-abc1234`)
@@ -145,7 +145,7 @@ These cover the gap between "job ran while browser/laptop was closed" and "user 
 - [x] **docker-compose.yml missing dest volume** — resolved; output goes into mounted NAS volumes directly (`/data/stems` or `/data/show_archive`). No separate converted volume needed.
 - [x] **docker-compose.yml missing config file mount** — not actually needed. App.py builds config from the web form and passes it as a temp YAML to process_audio.py. `config.docker.yaml` is command-line only and not used by the web UI.
 - [x] **Synology deployment workflow** — documented in README: SSH in, `git clone`, `echo '{}' > profile.json && last_job.json`, `mkdir -p logs`, `sudo docker compose up --build -d`. Update one-liner: `git fetch origin && git reset --hard origin/main && sudo docker compose up --build -d`.
-- [ ] **GitHub Actions image publish** — on every push to `main`, build image and push to `ghcr.io/scottie8392/ghost-processing:latest`. No Watchtower — Docker updates are manual via SSH one-liner. UI shows "Update available" badge when remote SHA differs from local; Docker mode displays the update command to run in the NAS terminal.
+- [x] **GitHub Actions image publish** — `.github/workflows/docker-publish.yml` builds and pushes to `ghcr.io/scottie8392/ghost-processing:latest` on every push to `main`. `GIT_SHA` build arg bakes SHA into `/app/VERSION` inside the image.
 - [x] **`save_profile()` is not atomic** — `app.py`'s `save_profile()` uses a plain `open()` + `json.dump()`, unlike the atomic tempfile+fsync+rename pattern used correctly in `process_audio.py`. Low risk for a local app but inconsistent — a crash mid-write could corrupt `profile.json`.
 - [x] **Completion counts parsed from log text** — `run_process()` in `app.py` still does incremental line-by-line counting as a live signal for the phase bar, but the final banner counts now come from parsing the `"Done: N converted[, N copied][, N silent][, N skipped] in Xs"` line emitted by `process_audio.py`'s `batch_process()` return values. This is authoritative regardless of parallel worker log ordering.
 
