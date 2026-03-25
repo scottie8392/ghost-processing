@@ -1,6 +1,7 @@
 services:
   ghost-processing:
     build: .
+    image: ghost-processing
     container_name: ghost-processing
     platform: linux/amd64  # Synology is Intel x86_64
     ports:
