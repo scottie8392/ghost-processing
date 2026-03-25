@@ -20,6 +20,7 @@ import json
 import shutil
 import signal
 import argparse
+import struct
 import tempfile
 import subprocess
 from datetime import datetime
@@ -254,6 +255,66 @@ def check_silence(audio_file, silence_thresh, min_silence_len, min_non_silent_le
         return False, None
 
 
+def copy_bwf_metadata(src_file, dest_file):
+    """
+    Copy BEXT chunk from src WAV to dest WAV using direct RIFF manipulation.
+    Only runs for .wav sources — AIFF has no BEXT chunk.
+    No-op if source has no BEXT. Logs a warning on failure but never raises.
+    """
+    if not src_file.lower().endswith(".wav"):
+        return
+    try:
+        bext_data = _read_bext_chunk(src_file)
+        if bext_data is None:
+            return
+        _write_bext_chunk(dest_file, bext_data)
+    except Exception as e:
+        logging.warning(f"BWF metadata copy error for {os.path.basename(src_file)}: {e}")
+
+
+def _read_bext_chunk(wav_path):
+    """Return raw BEXT chunk data bytes from a WAV file, or None if absent."""
+    with open(wav_path, "rb") as f:
+        header = f.read(12)
+        if len(header) < 12 or header[:4] != b"RIFF" or header[8:12] != b"WAVE":
+            return None
+        while True:
+            chunk_hdr = f.read(8)
+            if len(chunk_hdr) < 8:
+                return None
+            cid, csize = struct.unpack("<4sI", chunk_hdr)
+            if cid == b"bext":
+                return f.read(csize)
+            f.seek(csize + (csize % 2), 1)  # skip to next chunk (pad to even boundary)
+
+
+def _write_bext_chunk(wav_path, bext_data):
+    """Insert or replace BEXT chunk in a WAV file."""
+    with open(wav_path, "rb") as f:
+        raw = f.read()
+    if len(raw) < 12 or raw[:4] != b"RIFF" or raw[8:12] != b"WAVE":
+        raise ValueError("Not a valid WAV file")
+    # Rebuild chunk list, dropping any existing bext
+    out = bytearray(raw[:12])
+    pos = 12
+    while pos + 8 <= len(raw):
+        cid = raw[pos:pos+4]
+        csize = struct.unpack("<I", raw[pos+4:pos+8])[0]
+        padded = csize + (csize % 2)
+        if cid != b"bext":
+            out.extend(raw[pos:pos+8+padded])
+        pos += 8 + padded
+    # Append new bext chunk (pad to even byte boundary)
+    out.extend(struct.pack("<4sI", b"bext", len(bext_data)))
+    out.extend(bext_data)
+    if len(bext_data) % 2:
+        out.extend(b"\x00")
+    # Update RIFF size field
+    struct.pack_into("<I", out, 4, len(out) - 8)
+    with open(wav_path, "wb") as f:
+        f.write(out)
+
+
 def resample_audio(audio_file, dest_file, target_rate, bit_depth, dry_run):
     if dry_run:
         return True
@@ -419,6 +480,7 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
 
             if resample_audio(file_path, dest_path, target_rate, bit_depth, config["dry_run"]):
                 if not config["dry_run"]:
+                    copy_bwf_metadata(file_path, dest_path)
                     src_hash = file_hash(file_path)
                     append_log(
                         progress_log,

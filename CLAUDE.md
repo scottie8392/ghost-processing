@@ -18,7 +18,7 @@ A personal audio processing pipeline for a music studio. Converts stems (WAV/AIF
 
 ---
 
-## Current State (as of 2026-03-24, Sprint 1.1 complete)
+## Current State (as of 2026-03-24, Sprint 1.1 + 1.2 complete)
 
 The app is **feature-complete and working**. Core pipeline verified by real test runs. All known code bugs fixed. Remote configured at `origin/main`.
 
@@ -89,7 +89,7 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 See BACKLOG.md 🟡 section. Priority: SMB end-to-end, then Docker.
 
 ### 2. Remaining 🔴 bugs
-- **BWF metadata stripped by SoX** — BEXT chunks (timecode, originator) not preserved. Fix: `bwfmetaedit` post-step. (Sprint 1.2)
+- ~~BWF metadata stripped by SoX~~ — **fixed in Sprint 1.2**: pure Python RIFF chunk copy preserves BEXT (timecode, originator, session name) from source WAV to dest WAV after SoX conversion.
 - ~~Silence detection measurement mismatch~~ — **fixed in Sprint 1.1**: display and detection now both use peak short-time RMS; `level` value in log is directly comparable to threshold.
 
 ### 3. Docker compose gaps (before Docker test)
@@ -198,6 +198,7 @@ Per file in `process_file()`:
 | Docker platform `linux/amd64` | Synology NAS is Intel x86_64 |
 | Peak short-time RMS for silence display | `check_silence()` chunks audio into `min_non_silent_len` ms windows, takes `max(chunk.dBFS)` — same metric as `detect_nonsilent` uses internally. `level` value in log is directly comparable to silence threshold. Prevents false-positive on single transient peaks (old `max_dBFS`) while correctly keeping sparse content like a single rimshot. |
 | `min_silence_len` hardcoded, removed from UI | pydub gap-bridging parameter is irrelevant for binary keep/reject decisions. Hardcoded to 200ms; only `silence_thresh` and `min_non_silent_len` exposed in Advanced panel. |
+| BWF/BEXT preserved via pure Python RIFF manipulation | SoX strips BEXT chunks. `bwfmetaedit` CLI `--out-core`/`--in-core` round-trip was unreliable. Pure Python `_read_bext_chunk`/`_write_bext_chunk` reads raw BEXT bytes from source WAV RIFF structure and injects into dest — no external tools, guaranteed correct. TimeReference sample count preserved exactly; wall-clock shift on sample rate change is expected behavior. |
 | `_stop_requested` flag for Stop status | `/stop` sets flag before killpg; `run_process` reads it after wait() to write `"stopped"` vs `"error"` — can't use returncode alone since both are non-zero |
 | `output_suffix(rate, depth)` helper | Dest dirs and filenames include both rate and depth e.g. `48k-24b`; prevents collisions across bit depths and makes skip logic unambiguous |
 | 32f AIF/AIFF → .wav output | AIFF can't encode float; SoX silently falls back to 32i. Force .wav for 32f+AIF sources. Same ext swap mirrored in both verifiers. |
