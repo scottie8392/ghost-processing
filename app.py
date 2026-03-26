@@ -515,6 +515,71 @@ def disconnect():
     return jsonify({"success": False, "message": error})
 
 
+@app.route("/preflight", methods=["POST"])
+def preflight():
+    """
+    Pre-flight environment check — called by the UI before starting a job.
+    Validates: SoX installed, source path accessible, dest parent writable.
+    Returns: {"checks": [{"name", "ok", "message"}], "all_ok": bool}
+    """
+    import shutil as _shutil
+
+    data = request.json or {}
+    checks = []
+
+    # 1. SoX installed
+    sox_path = _shutil.which("sox")
+    if sox_path:
+        try:
+            r = subprocess.run(["sox", "--version"], capture_output=True, text=True, timeout=5)
+            version_line = (r.stderr or r.stdout or "").strip().splitlines()[0] if (r.stderr or r.stdout) else ""
+            checks.append({"name": "SoX", "ok": True, "message": version_line or sox_path})
+        except Exception:
+            checks.append({"name": "SoX", "ok": True, "message": sox_path})
+    else:
+        checks.append({"name": "SoX", "ok": False,
+                       "message": "sox not found — install via Homebrew: brew install sox"})
+
+    # 2. Source path readable
+    source_dir, dest_base, mount_error = resolve_paths(data)
+    if mount_error:
+        checks.append({"name": "Source", "ok": False, "message": f"Mount error: {mount_error}"})
+        checks.append({"name": "Destination", "ok": False, "message": "Cannot check — source mount failed"})
+    else:
+        if source_dir and os.path.isdir(source_dir) and os.access(source_dir, os.R_OK):
+            checks.append({"name": "Source", "ok": True, "message": source_dir})
+        elif not source_dir:
+            checks.append({"name": "Source", "ok": False, "message": "No source path provided"})
+        elif not os.path.isdir(source_dir):
+            checks.append({"name": "Source", "ok": False, "message": f"Directory not found: {source_dir}"})
+        else:
+            checks.append({"name": "Source", "ok": False, "message": f"Not readable: {source_dir}"})
+
+        # 3. Dest parent writable
+        # dest_base may be empty — default is parent of source_dir
+        dest_check = dest_base or (os.path.dirname(source_dir.rstrip("/\\")) if source_dir else "")
+        if not dest_check:
+            checks.append({"name": "Destination", "ok": False, "message": "Cannot determine destination path"})
+        else:
+            # Check the first existing ancestor — dest itself may not exist yet
+            check_path = dest_check
+            while check_path and not os.path.exists(check_path):
+                parent = os.path.dirname(check_path)
+                if parent == check_path:
+                    break
+                check_path = parent
+            if check_path and os.access(check_path, os.W_OK):
+                checks.append({"name": "Destination", "ok": True, "message": dest_check})
+            elif not check_path:
+                checks.append({"name": "Destination", "ok": False, "message": f"No writable ancestor found for: {dest_check}"})
+            else:
+                checks.append({"name": "Destination", "ok": False,
+                               "message": f"Not writable: {check_path}"})
+
+    all_ok = all(c["ok"] for c in checks)
+    return jsonify({"checks": checks, "all_ok": all_ok})
+
+
 @app.route("/run", methods=["POST"])
 def run():
     global _active_process, _is_running, _current_job, _stop_requested

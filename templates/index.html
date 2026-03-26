@@ -454,12 +454,18 @@
       font-size: 12px;
       color: var(--text-dim);
     }
-    .completion-stats .cs-converted { color: var(--success); font-weight: 600; }
-    .completion-stats .cs-copied    { color: var(--success); font-weight: 600; }
-    .completion-stats .cs-merged    { color: #2196f3;         font-weight: 600; }
-    .completion-stats .cs-rejected  { color: var(--error);   font-weight: 600; }
-    .completion-stats .cs-skipped   { color: #666;           font-weight: 600; }
-    .completion-stats .cs-sep       { color: #333; }
+    .completion-stats .cs-converted,
+    .hr-stats .cs-converted { color: var(--success); font-weight: 600; }
+    .completion-stats .cs-copied,
+    .hr-stats .cs-copied    { color: var(--success); font-weight: 600; }
+    .completion-stats .cs-merged,
+    .hr-stats .cs-merged    { color: #2196f3;         font-weight: 600; }
+    .completion-stats .cs-rejected,
+    .hr-stats .cs-rejected  { color: var(--error);   font-weight: 600; }
+    .completion-stats .cs-skipped,
+    .hr-stats .cs-skipped   { color: #666;           font-weight: 600; }
+    .completion-stats .cs-sep,
+    .hr-stats .cs-sep       { color: #333; }
     .completion-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
     .btn-new-run {
       margin-top: 6px;
@@ -1477,8 +1483,34 @@
 
     resetUI();
     lastRunChip.classList.add('hidden');
-    setStatus('running', 'Running…');
+    setStatus('running', 'Checking…');
     btnRun.disabled = true;
+    btnStop.disabled = true;
+
+    // Pre-flight check
+    try {
+      const pfRes = await fetch('/preflight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg),
+      });
+      const pf = await pfRes.json();
+      if (!pf.all_ok) {
+        pf.checks.forEach(c => {
+          if (!c.ok) addLine(`Pre-flight failed — ${c.name}: ${c.message}`, 'error');
+        });
+        setStatus('error', 'Error');
+        btnRun.disabled = false; btnStop.disabled = true;
+        return;
+      }
+    } catch (e) {
+      addLine('Pre-flight check failed: ' + e.message, 'error');
+      setStatus('error', 'Error');
+      btnRun.disabled = false; btnStop.disabled = true;
+      return;
+    }
+
+    setStatus('running', 'Running…');
     btnStop.disabled = false;
 
     try {
