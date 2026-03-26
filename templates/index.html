@@ -850,7 +850,8 @@
       <summary>Advanced</summary>
       <div class="detail-body">
 
-        <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:12px;">
+          <button class="btn-reset" id="btn-save-defaults" onclick="saveDefaults()">↓ Save as defaults</button>
           <button class="btn-reset" onclick="resetToDefaults()">↺ Reset to defaults</button>
         </div>
 
@@ -1168,15 +1169,38 @@
     document.getElementById('field_stability_wait').style.visibility = on ? 'visible' : 'hidden';
   }
 
-  function resetToDefaults() {
-    if (!confirm('Reset all advanced settings to their defaults?')) return;
-    document.getElementById('target_sample_rate').value  = DEFAULTS.target_sample_rate;
-    document.getElementById('bit_depth').value           = DEFAULTS.bit_depth;
-    document.getElementById('silence_thresh').value      = DEFAULTS.silence_thresh;
-    document.getElementById('min_non_silent_len').value  = DEFAULTS.min_non_silent_len;
-    document.getElementById('watch_mode').checked        = DEFAULTS.watch_mode;
-    document.getElementById('stability_wait_sec').value  = DEFAULTS.stability_wait_sec;
-    document.getElementById('log_dir').value             = DEFAULTS.log_dir;
+  async function saveDefaults() {
+    const btn = document.getElementById('btn-save-defaults');
+    const orig = btn.textContent;
+    try {
+      await fetch('/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(getConfig()),
+      });
+      btn.textContent = '✓ Saved';
+      setTimeout(() => { btn.textContent = orig; }, 1800);
+    } catch (e) {
+      btn.textContent = '✗ Failed';
+      setTimeout(() => { btn.textContent = orig; }, 1800);
+    }
+  }
+
+  async function resetToDefaults() {
+    if (!confirm('Reset advanced settings to your saved defaults?')) return;
+    let p = {};
+    try {
+      const res = await fetch('/profile');
+      p = await res.json();
+    } catch (e) { /* fall through to factory defaults */ }
+    setSel('target_sample_rate', p.target_sample_rate != null ? p.target_sample_rate : DEFAULTS.target_sample_rate);
+    setSel('bit_depth',          p.bit_depth          != null ? p.bit_depth          : DEFAULTS.bit_depth);
+    setVal('silence_thresh',     p.silence_thresh     != null ? p.silence_thresh     : DEFAULTS.silence_thresh);
+    setVal('min_non_silent_len', p.min_non_silent_len != null ? p.min_non_silent_len : DEFAULTS.min_non_silent_len);
+    setVal('max_workers',        p.max_workers        != null ? p.max_workers        : 6);
+    setChk('watch_mode',         p.watch_mode);
+    setVal('stability_wait_sec', p.stability_wait_sec != null ? p.stability_wait_sec : DEFAULTS.stability_wait_sec);
+    setVal('log_dir',            p.log_dir            || DEFAULTS.log_dir);
     toggleWatchFields();
   }
 
@@ -1274,6 +1298,8 @@
     if (m.startsWith('rejected:'))                           return 'error';
     if (m.startsWith('checking:') || m.startsWith('analyzing:')) return 'dim';
     if (m.includes('skip') || m.includes('already processed')) return 'dim';
+    if (m.trimStart().startsWith('sox:') || m.trimStart().startsWith('source:') ||
+        m.trimStart().startsWith('dest:') || m.trimStart().startsWith('silence:')) return 'dim';
     if (m.startsWith('session:') || m.startsWith('found ') || m.startsWith('done:') || m.startsWith('run log:') || m.includes('dry run complete') || m.includes('verification') || m.includes('post-run') || m.includes('l/r combining')) return 'meta';
     return '';
   }

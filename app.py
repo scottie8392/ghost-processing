@@ -399,6 +399,13 @@ def get_profile():
     return jsonify(load_profile())
 
 
+@app.route("/profile", methods=["POST"])
+def post_profile():
+    """Save current form state as new defaults without starting a run."""
+    save_profile(request.json or {})
+    return jsonify({"ok": True})
+
+
 @app.route("/connect", methods=["POST"])
 def connect():
     """
@@ -498,6 +505,40 @@ def run():
     _stop_requested = False   # clear any previous stop flag before starting a new job
 
     data = request.json
+
+    # --- Validate config before doing anything else ---
+    _VALID_RATES  = {44100, 48000, 88200, 96000}
+    _VALID_DEPTHS = {16, 24, 32, "32f"}
+    src = (data.get("source_dir") or "").strip()
+    if not src:
+        return jsonify({"error": "Source path is required."}), 400
+    try:
+        workers = int(data.get("max_workers", 6))
+        if not 1 <= workers <= 32:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "Workers must be a number between 1 and 32."}), 400
+    try:
+        thresh = float(data.get("silence_thresh", -50.0))
+        if thresh > 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "Silence threshold must be 0 or negative (e.g. -50.0)."}), 400
+    try:
+        rate = int(data.get("target_sample_rate", 48000))
+        if rate not in _VALID_RATES:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": f"Invalid sample rate. Must be one of: {sorted(_VALID_RATES)}."}), 400
+    depth = data.get("bit_depth", 24)
+    try:
+        depth_key = int(depth)
+    except (TypeError, ValueError):
+        depth_key = str(depth)
+    if depth_key not in _VALID_DEPTHS:
+        return jsonify({"error": f"Invalid bit depth. Must be one of: 16, 24, 32, 32f."}), 400
+    # --- End validation ---
+
     save_profile(data)
 
     source_dir, dest_base, mount_error = resolve_paths(data)

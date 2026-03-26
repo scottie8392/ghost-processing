@@ -188,6 +188,17 @@ def get_bit_depth(file_path):
         return None
 
 
+def get_channels(file_path):
+    """Return the channel count using soxi, or None on failure."""
+    try:
+        result = subprocess.run(
+            ["soxi", "-c", file_path], capture_output=True, text=True, check=True
+        )
+        return int(result.stdout.strip())
+    except Exception:
+        return None
+
+
 def fmt_rate(rate):
     """Format a sample rate for display: 44100 → '44.1k', 48000 → '48k'."""
     if rate is None:
@@ -218,16 +229,32 @@ def output_suffix(target_rate, bit_depth):
 
 def check_silence(audio_file, silence_thresh, min_silence_len, min_non_silent_len):
     """
-    Returns (is_silent, level_db).
+    Returns (is_silent, level_db, region_count).
 
     level_db is the peak short-time RMS in dBFS: the loudest chunk's RMS level
     using the same window size (min_non_silent_len ms) as detect_nonsilent.
     Directly comparable to silence_thresh — both use RMS energy.
 
-    Returns -inf for a truly silent file, None on decode error.
+    region_count is the number of non-silent regions detected (0 = silent file).
+    Returns -inf / 0 for a truly silent file, None / None on decode error.
     """
     try:
-        audio = AudioSegment.from_file(audio_file)
+        # Suppress pydub/ffmpeg subprocess noise — pydub prints the ffmpeg
+        # command directly to fd 1/2 for non-WAV formats (AIF/AIFF).
+        # contextlib.redirect_stdout only redirects Python's sys.stdout;
+        # os.dup2 redirects at the kernel level and catches everything.
+        _devnull = os.open(os.devnull, os.O_WRONLY)
+        _saved_out, _saved_err = os.dup(1), os.dup(2)
+        try:
+            os.dup2(_devnull, 1)
+            os.dup2(_devnull, 2)
+            audio = AudioSegment.from_file(audio_file)
+        finally:
+            os.dup2(_saved_out, 1)
+            os.dup2(_saved_err, 2)
+            os.close(_saved_out)
+            os.close(_saved_err)
+            os.close(_devnull)
         non_silent = silence.detect_nonsilent(
             audio, min_silence_len=min_non_silent_len, silence_thresh=silence_thresh
         )
@@ -246,13 +273,13 @@ def check_silence(audio_file, silence_thresh, min_silence_len, min_non_silent_le
                 frames.append(remainder)
             level_db = max(f.dBFS for f in frames) if frames else float("-inf")
 
-        return not bool(non_silent), level_db
+        return not bool(non_silent), level_db, len(non_silent)
     except CouldntDecodeError as e:
         logging.error(f"Decode error for {audio_file}: {e}")
-        return False, None  # Treat as non-silent to avoid false rejects
+        return False, None, None
     except Exception as e:
         logging.error(f"Silence detection error for {audio_file}: {e}")
-        return False, None
+        return False, None, None
 
 
 def copy_bwf_metadata(src_file, dest_file):
@@ -315,7 +342,8 @@ def _write_bext_chunk(wav_path, bext_data):
         f.write(out)
 
 
-def resample_audio(audio_file, dest_file, target_rate, bit_depth, dry_run):
+def resample_audio(audio_file, dest_file, target_rate, bit_depth, dry_run,
+                   verbose=False):
     if dry_run:
         return True
     try:
@@ -329,6 +357,8 @@ def resample_audio(audio_file, dest_file, target_rate, bit_depth, dry_run):
         if not is_float:
             effects += ["dither", "-s"]
         cmd = ["sox", audio_file] + fmt_opts + [dest_file] + effects
+        if verbose:
+            logging.debug(f"  sox: {' '.join(cmd[1:])}")
         subprocess.run(cmd, check=True, capture_output=True)
         return True
     except subprocess.CalledProcessError as e:
@@ -430,10 +460,15 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                 except json.JSONDecodeError:
                     progress = {}
             if rel_path in progress and progress[rel_path].get("status") in ("converted", "copied"):
-                if os.path.exists(dest_path) and file_hash(file_path) == progress[rel_path].get("source_hash"):
-                    logging.info(f"Already processed, skipping: {rel_path}")
+                src_hash = file_hash(file_path)
+                if os.path.exists(dest_path) and src_hash == progress[rel_path].get("source_hash"):
+                    if config.get("verbose"):
+                        logging.info(f"Skipped: {rel_path}  (already in dest, hash {src_hash[:8]})")
+                    else:
+                        logging.info(f"Skipped: {rel_path}  (already in dest)")
                     return "skipped"
 
+            t0 = time.time()
             sample_rate = get_sample_rate(file_path)
             source_bits = get_bit_depth(file_path)
             is_float_target = str(bit_depth) == "32f"
@@ -444,15 +479,28 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
             dest_fmt = f"{fmt_rate(target_rate)}/{fmt_depth(bit_depth)}"
             logging.info(f"Checking: {rel_path}  ({src_fmt})")
 
+            if config.get("verbose"):
+                size_mb = os.path.getsize(file_path) / (1024 * 1024)
+                channels = get_channels(file_path)
+                ch_str = f"{channels}ch" if channels is not None else "?ch"
+                logging.debug(f"  source: {size_mb:.1f}MB, {ch_str}, {src_fmt}")
+                logging.debug(f"  dest:   {dest_path}")
+
             # Silence check runs on ALL files before copy or convert.
             # A silent file never reaches the destination regardless of format.
-            is_silent, level_db = check_silence(
+            is_silent, level_db, region_count = check_silence(
                 file_path,
                 config["silence_thresh"],
                 config["min_silence_len"],
                 config["min_non_silent_len"],
             )
             level_str = f"  level {level_db:.1f}dBFS" if level_db is not None and level_db != float("-inf") else "  level -∞dBFS" if level_db is not None else ""
+            verbose = config.get("verbose", False)
+
+            if verbose and region_count is not None:
+                verdict = "rejected" if is_silent else "kept"
+                logging.debug(f"  silence: {region_count} non-silent region{'s' if region_count != 1 else ''} → {verdict}")
+
             if is_silent:
                 logging.info(f"Rejected: {rel_path}  ({src_fmt}, silent,{level_str})")
                 if not config.get("dry_run"):
@@ -475,10 +523,12 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                     {rel_path: {"status": "copied", "source_hash": src_hash, "timestamp": str(datetime.now())}},
                     is_list=False,
                 )
-                logging.info(f"Copied: {rel_path}  ({src_fmt}, no conversion needed,{level_str})")
+                elapsed = f"  {time.time() - t0:.1f}s" if verbose else ""
+                logging.info(f"Copied: {rel_path}  ({src_fmt}, no conversion needed,{level_str}{elapsed})")
                 return "copied"
 
-            if resample_audio(file_path, dest_path, target_rate, bit_depth, config["dry_run"]):
+            if resample_audio(file_path, dest_path, target_rate, bit_depth, config["dry_run"],
+                              verbose=verbose):
                 if not config["dry_run"]:
                     copy_bwf_metadata(file_path, dest_path)
                     src_hash = file_hash(file_path)
@@ -487,10 +537,11 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                         {rel_path: {"status": "converted", "source_hash": src_hash, "timestamp": str(datetime.now())}},
                         is_list=False,
                     )
+                elapsed = f"  {time.time() - t0:.1f}s" if verbose else ""
                 if config["dry_run"]:
                     logging.info(f"[DRY RUN] Would convert: {rel_path}  ({src_fmt} → {dest_fmt},{level_str})")
                 else:
-                    logging.info(f"Converted: {rel_path}  ({src_fmt} → {dest_fmt},{level_str})")
+                    logging.info(f"Converted: {rel_path}  ({src_fmt} → {dest_fmt},{level_str}{elapsed})")
                 return file_path
             return None
 

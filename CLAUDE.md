@@ -18,7 +18,7 @@ A personal audio processing pipeline for a music studio. Converts stems (WAV/AIF
 
 ---
 
-## Current State (as of 2026-03-25, Sprint 1.1 + 1.2 + Sprint 2 + Sprint 4 complete)
+## Current State (as of 2026-03-25, Sprint 1.1 + 1.2 + Sprint 2 + Sprint 4 + Sprint 5 complete)
 
 The app is **feature-complete and working**. Core pipeline verified by real test runs. All known code bugs fixed. Remote configured at `origin/main`.
 
@@ -76,6 +76,13 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - NAS mode dest path: local absolute paths (e.g. /Users/scottie/Desktop) used as-is; not mangled through NAS share detection
 - SMB share name vs mount point: uses nasShareRoot (actual share name) not the local folder name which macOS may suffix with -1/-2
 
+### Verified by Sprint 5:
+- pydub/ffmpeg subprocess noise suppressed — fd-level redirect (os.dup2) silences ffmpeg command strings from AIF decode
+- Config validation in `/run` — source required, workers 1–32, silence_thresh ≤ 0, valid sample rate + bit depth; 400 error shown in log panel
+- Save as defaults button — POST /profile saves current form state; Reset to defaults restores from profile.json (not factory hardcoded values)
+- Verbose mode fully functional: `source: NMB, Nch, fmt`, `dest: /full/path`, `silence: N regions → kept/rejected`, `sox: {command}`, per-file elapsed time on result lines, hash on Skipped lines
+- Skipped log line reformatted: `Skipped: stem.wav  (already in dest)` — consistent with other result lines
+
 ### Verified by Sprint 4:
 - L/R combining — `find_lr_source_pairs()` scans source before batch; matched L/R filtered from `batch_process`; `merge_lr_pairs()` merges directly source→dest with `sox -M` + conversion flags in one pass — L/R files never appear in dest
 - Naming convention — `output_suffix()` returns `48k24b` (no dash); separator between basename and suffix is `_` everywhere (`Boston_48k24b/`, `stem_48k24b.wav`)
@@ -102,8 +109,8 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 
 ## Immediate Next Steps
 
-### Sprint 5 — see BACKLOG.md for candidates
-All 🔴 bugs fixed. L/R combining complete. Focus on workflow features and quality-of-life improvements.
+### Sprint 6 — see BACKLOG.md for candidates
+All 🔴 bugs fixed. L/R combining, verbose mode, config validation, save-as-defaults all complete.
 
 ---
 
@@ -159,7 +166,7 @@ _current_job     = None          # {"name": str, "source": str} set when a job s
 | Type | Payload | Purpose |
 |------|---------|---------|
 | `log` | `{"message": str}` | Log line for output panel + phase bar parsing |
-| `summary` | `{"job_name": str, "converted": N, "copied": N, "rejected": N, "skipped": N}` | Server-verified counts before done |
+| `summary` | `{"job_name": str, "converted": N, "copied": N, "rejected": N, "skipped": N, "merged": N, "unpaired": N}` | Server-verified counts before done |
 | `done` | `{"returncode": int, "job_name": str, "status": "done"\|"stopped"\|"error"}` | Job finished |
 | `heartbeat` | — | Keep SSE connection alive |
 
@@ -170,7 +177,12 @@ _current_job     = None          # {"name": str, "source": str} set when a job s
 4. `detect_nas_share()` auto-derives NFS export root from source path (Synology `volumeN` convention aware)
 
 ### Conversion pipeline (process_audio.py)
-Per file in `process_file()`:
+
+**Pre-batch (if combine_lr enabled):**
+- `find_lr_source_pairs(source_dir)` — scans source, returns matched pairs + unpaired list
+- Matched L/R paths added to skip set; `merge_lr_pairs()` runs after batch completes
+
+**Per file in `process_file()`:**
 1. Zero-byte check — reject immediately (return None)
 2. Resume check — if in `progress.json` with matching source MD5 hash and dest file exists → return `"skipped"`
 3. `soxi -r` + `soxi -b` — log `"Checking: {rel_path}  ({src_fmt})"`
@@ -178,9 +190,12 @@ Per file in `process_file()`:
 5. Already at target rate+depth → `shutil.copy2` (return `"copied"`)
 6. SoX subprocess: `sox input [-b N] [-e floating-point] output rate -v SR [dither -s]`
 7. Atomic write to `progress.json` on success; return file path (truthy → converted)
-8. Auto-verification at end of batch; run log also written to dest folder
 
-`batch_process()` counts returns: `"copied"` → copied, `"skipped"` → skipped, truthy path → converted, None → rejected. Emits `"Done: N converted[, N copied][, N silent][, N skipped] in Xs"` — this line is parsed by app.py as the authoritative count for the SSE summary event and completion banner.
+**Post-batch:**
+- `merge_lr_pairs()` — for each pair: `sox -M left right -b N outpath rate -v RATE dither -s` directly source→dest. Logs `Merged: Drums/808_15.wav  (48k/24b → 44.1k/16b)`.
+- Auto-verification; run log written to dest folder
+
+`batch_process()` counts returns: `"copied"` → copied, `"skipped"` → skipped, truthy path → converted, None → rejected. Emits `"Done: N converted[, N copied][, N silent][, N skipped][, N merged][, N unpaired] in Xs"` — parsed by app.py as authoritative counts for SSE summary and banner.
 
 **No tqdm** — was removed because tqdm's `\r` progress bar writes to stderr (merged into stdout pipe) were corrupting parallel worker log lines via Python's universal-newlines `\r`-as-newline handling. UI has its own phase bar.
 
@@ -199,7 +214,7 @@ Per file in `process_file()`:
 | `last_job.json` separate from `profile.json` | Profile = settings (stable); last_job = ephemeral state (overwrites each run) |
 | Job name from `os.path.basename(source_dir)` | Natural, automatic, meaningful in notifications |
 | Destination defaults to `dirname(source_dir)` | Most natural workflow — output lands next to input |
-| Output naming `{name}-{rate}k-{depth}b` | Suffix includes both rate and bit depth (e.g. 48000/24 → `48k-24b`, 44100/32f → `44k-32f`) so different conversions never collide and skip logic is unambiguous |
+| Output naming `{name}_{rate}k{depth}b` | Suffix includes both rate and bit depth (e.g. 48000/24 → `48k24b`, 44100/32f → `44k32f`); underscore separator between basename and suffix; no dash in suffix — cleaner than `48k-24b`. Different conversions never collide and skip logic is unambiguous. |
 | Run log copied to dest folder | Each conversion folder is self-contained — open it later, full record is there |
 | `sudo mount_nfs` primary, osascript fallback | sudo is silent and stable; osascript avoids sudo dependency but can show macOS dialogs |
 | Sudoers check via stderr grep | `sudo -n mount_nfs` exit code is unreliable; checking for "password is required" in stderr is accurate |
@@ -246,4 +261,4 @@ python verify_audio.py --config config.local.yaml
 
 - Branch: `main`
 - Remote: `origin/main` — `https://github.com/scottie8392/ghost-processing`
-- Working tree: clean as of 2026-03-25 Sprint 4 completion
+- Working tree: clean as of 2026-03-25 Sprint 5 completion
