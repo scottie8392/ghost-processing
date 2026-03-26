@@ -330,7 +330,8 @@ def _write_bext_chunk(wav_path, bext_data):
         f.write(out)
 
 
-def resample_audio(audio_file, dest_file, target_rate, bit_depth, dry_run):
+def resample_audio(audio_file, dest_file, target_rate, bit_depth, dry_run,
+                   verbose=False):
     if dry_run:
         return True
     try:
@@ -344,6 +345,8 @@ def resample_audio(audio_file, dest_file, target_rate, bit_depth, dry_run):
         if not is_float:
             effects += ["dither", "-s"]
         cmd = ["sox", audio_file] + fmt_opts + [dest_file] + effects
+        if verbose:
+            logging.debug(f"  sox: {' '.join(cmd[1:])}")
         subprocess.run(cmd, check=True, capture_output=True)
         return True
     except subprocess.CalledProcessError as e:
@@ -446,9 +449,10 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                     progress = {}
             if rel_path in progress and progress[rel_path].get("status") in ("converted", "copied"):
                 if os.path.exists(dest_path) and file_hash(file_path) == progress[rel_path].get("source_hash"):
-                    logging.info(f"Already processed, skipping: {rel_path}")
+                    logging.info(f"Skipped: {rel_path}  (already in dest)")
                     return "skipped"
 
+            t0 = time.time()
             sample_rate = get_sample_rate(file_path)
             source_bits = get_bit_depth(file_path)
             is_float_target = str(bit_depth) == "32f"
@@ -478,6 +482,8 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                     )
                 return None
 
+            verbose = config.get("verbose", False)
+
             # Already at target rate and bit depth — copy, don't resample
             if already_right_rate and already_right_depth:
                 if config["dry_run"]:
@@ -490,10 +496,12 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                     {rel_path: {"status": "copied", "source_hash": src_hash, "timestamp": str(datetime.now())}},
                     is_list=False,
                 )
-                logging.info(f"Copied: {rel_path}  ({src_fmt}, no conversion needed,{level_str})")
+                elapsed = f"  {time.time() - t0:.1f}s" if verbose else ""
+                logging.info(f"Copied: {rel_path}  ({src_fmt}, no conversion needed,{level_str}{elapsed})")
                 return "copied"
 
-            if resample_audio(file_path, dest_path, target_rate, bit_depth, config["dry_run"]):
+            if resample_audio(file_path, dest_path, target_rate, bit_depth, config["dry_run"],
+                              verbose=verbose):
                 if not config["dry_run"]:
                     copy_bwf_metadata(file_path, dest_path)
                     src_hash = file_hash(file_path)
@@ -502,10 +510,11 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                         {rel_path: {"status": "converted", "source_hash": src_hash, "timestamp": str(datetime.now())}},
                         is_list=False,
                     )
+                elapsed = f"  {time.time() - t0:.1f}s" if verbose else ""
                 if config["dry_run"]:
                     logging.info(f"[DRY RUN] Would convert: {rel_path}  ({src_fmt} → {dest_fmt},{level_str})")
                 else:
-                    logging.info(f"Converted: {rel_path}  ({src_fmt} → {dest_fmt},{level_str})")
+                    logging.info(f"Converted: {rel_path}  ({src_fmt} → {dest_fmt},{level_str}{elapsed})")
                 return file_path
             return None
 
