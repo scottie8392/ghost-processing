@@ -1056,6 +1056,7 @@
     <div class="review-header" style="cursor:pointer" onclick="toggleHistory()">
       <h2>Run History</h2>
       <span class="badge badge-skipped" id="history-badge" style="margin-left:auto"></span>
+      <button class="btn-reset" id="btn-clear-history" onclick="event.stopPropagation(); clearHistory()" style="font-size:11px; padding:3px 8px; margin-left:8px;">Clear</button>
       <span id="history-toggle-icon" style="color:var(--text-dim); font-size:12px; margin-left:8px;">▾</span>
     </div>
     <div id="history-body">
@@ -1402,7 +1403,7 @@
       addReviewItem(msg, 'merged');
     } else if (m.startsWith('merge already done')) {
       // Already-done merge — not a new merge this run; just a dim log line, no File Review entry
-    } else if (m.includes('skipping:') || m.includes('already processed')) {
+    } else if (m.startsWith('skipped:') || m.includes('skipping:') || m.includes('already processed')) {
       addReviewItem(msg, 'skipped');
     } else if (m.includes('unpaired l/r')) {
       addReviewItem(msg, 'unpaired');
@@ -1677,9 +1678,11 @@
           ? new Date(job.finished_at).toLocaleString([], {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})
           : '';
 
-        const copiedPart  = job.copied  > 0 ? ` / ${job.copied} copied`  : '';
-        const mergedPart  = job.merged  > 0 ? ` / ${job.merged} merged`  : '';
-        const stats = `${job.converted ?? '?'} converted${copiedPart}${mergedPart} · ${job.rejected ?? 0} silent · ${job.skipped ?? 0} skipped`;
+        let stats = `<span class="cs-converted">${job.converted ?? '?'} converted</span>`;
+        if (job.copied  > 0) stats += ` <span class="cs-sep">·</span> <span class="cs-copied">${job.copied} copied</span>`;
+        if (job.merged  > 0) stats += ` <span class="cs-sep">·</span> <span class="cs-merged">${job.merged} merged</span>`;
+        stats += ` <span class="cs-sep">·</span> <span class="cs-rejected">${job.rejected ?? 0} silent</span>`;
+        stats += ` <span class="cs-sep">·</span> <span class="cs-skipped">${job.skipped ?? 0} skipped</span>`;
 
         const tr = document.createElement('tr');
         tr.innerHTML =
@@ -1692,6 +1695,16 @@
 
       card.classList.remove('hidden');
     } catch (e) { /* history is non-critical */ }
+  }
+
+  async function clearHistory() {
+    if (!confirm('Clear all run history?')) return;
+    try {
+      await fetch('/history', { method: 'DELETE' });
+      document.getElementById('history-card').classList.add('hidden');
+      document.getElementById('history-rows').innerHTML = '';
+      document.getElementById('history-badge').textContent = '';
+    } catch (e) { /* non-critical */ }
   }
 
   async function stopRun() {

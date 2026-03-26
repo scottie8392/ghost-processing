@@ -925,7 +925,7 @@ def status():
     })
 
 
-@app.route("/history")
+@app.route("/history", methods=["GET"])
 def history():
     """Return run history (last 50 non-dry-run jobs)."""
     if not os.path.exists(HISTORY_PATH):
@@ -935,6 +935,17 @@ def history():
             return jsonify(json.load(f))
     except Exception:
         return jsonify([])
+
+
+@app.route("/history", methods=["DELETE"])
+def clear_history():
+    """Delete run history."""
+    try:
+        if os.path.exists(HISTORY_PATH):
+            os.unlink(HISTORY_PATH)
+    except Exception:
+        pass
+    return jsonify({"ok": True})
 
 
 @app.route("/verify", methods=["POST"])
