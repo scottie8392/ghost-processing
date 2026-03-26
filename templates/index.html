@@ -1104,28 +1104,14 @@
   const phaseCount       = document.getElementById('phase-count');
   let rejectedCount = 0, skippedCount = 0, convertedCount = 0, copiedCount = 0, mergedCount = 0, unpairedCount = 0;
   let totalFiles = 0, liveDoneCount = 0;
-  let _jobStartTime = null;
   let _activityTimer = null;
 
   function updatePhase() {
     if (totalFiles === 0) return;
+    phaseLabel.textContent = 'Processing';
     const pct = Math.round((liveDoneCount / totalFiles) * 100);
     phaseFill.style.width = pct + '%';
     phaseCount.textContent = liveDoneCount + '/' + totalFiles;
-
-    // ETA calculation
-    if (_jobStartTime && liveDoneCount > 0 && liveDoneCount < totalFiles) {
-      const elapsed = (Date.now() - _jobStartTime) / 1000; // seconds
-      const rate    = liveDoneCount / elapsed;              // files/sec
-      const eta     = Math.round((totalFiles - liveDoneCount) / rate);
-      let etaStr;
-      if (eta < 60)        etaStr = eta + 's';
-      else if (eta < 3600) etaStr = Math.floor(eta / 60) + 'm ' + (eta % 60) + 's';
-      else                 etaStr = Math.floor(eta / 3600) + 'h ' + Math.floor((eta % 3600) / 60) + 'm';
-      phaseLabel.textContent = 'Processing · ETA ' + etaStr;
-    } else {
-      phaseLabel.textContent = 'Processing';
-    }
   }
 
   function _resetActivityTimer() {
@@ -1298,7 +1284,7 @@
     mergedList.innerHTML   = '<li class="review-empty">None this run</li>';
     unpairedList.innerHTML = '<li class="review-empty">None this run</li>';
     rejectedCount = 0; skippedCount = 0; convertedCount = 0; copiedCount = 0; mergedCount = 0; unpairedCount = 0;
-    totalFiles = 0; liveDoneCount = 0; _jobStartTime = null;
+    totalFiles = 0; liveDoneCount = 0;
     _clearActivityTimer();
     badgeRejected.textContent = '0 rejected';
     badgeSkipped.textContent  = '0 skipped';
@@ -1414,7 +1400,7 @@
       addReviewItem(msg, 'rejected');
     } else if (m.includes('skipping:') || m.includes('already processed')) {
       addReviewItem(msg, 'skipped');
-    } else if (m.startsWith('merged:') || m.includes('[dry run] would merge')) {
+    } else if (m.startsWith('merged:') || m.includes('[dry run] would merge') || m.startsWith('merge already done')) {
       addReviewItem(msg, 'merged');
     } else if (m.includes('unpaired l/r')) {
       addReviewItem(msg, 'unpaired');
@@ -1538,7 +1524,6 @@
           const m = ml.match(/found (\d+) audio files/);
           if (m) {
             totalFiles = parseInt(m[1]);
-            _jobStartTime = Date.now();
             phaseRow.classList.remove('hidden');
           }
         }
@@ -1629,14 +1614,18 @@
       const label = allGood ? 'Verification passed' : 'Verification found issues';
 
       let html = `<span class="${cls}">${icon} ${label}</span>`;
-      html += `<div class="verify-stat">${data.source_files} source files · ${data.converted} converted · ${data.rejected} rejected · ${data.unprocessed} unprocessed · ${data.missing_dest} missing dest · ${data.hash_mismatches} hash mismatches</div>`;
+      let statParts = [`${data.source_files} source`, `${data.converted} converted`];
+      if (data.merged  > 0) statParts.push(`${data.merged} merged (L/R)`);
+      if (data.unpaired > 0) statParts.push(`${data.unpaired} unpaired (blocked)`);
+      statParts.push(`${data.rejected} rejected`, `${data.unprocessed} unprocessed`, `${data.missing_dest} missing`, `${data.hash_mismatches} hash mismatches`);
+      html += `<div class="verify-stat">${statParts.join(' · ')}</div>`;
 
       if (data.missing_dest_files && data.missing_dest_files.length) {
         html += `<div class="verify-warn" style="margin-top:6px;">Missing dest files:</div>`;
         html += `<ul class="verify-list">${data.missing_dest_files.map(f => `<li>${f}</li>`).join('')}</ul>`;
       }
       if (data.unprocessed_files && data.unprocessed_files.length) {
-        html += `<div class="verify-warn" style="margin-top:6px;">Unprocessed source files:</div>`;
+        html += `<div class="verify-warn" style="margin-top:6px;">Unprocessed (not accounted for):</div>`;
         html += `<ul class="verify-list">${data.unprocessed_files.map(f => `<li>${f}</li>`).join('')}</ul>`;
       }
       if (data.hash_mismatch_files && data.hash_mismatch_files.length) {
