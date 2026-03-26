@@ -757,18 +757,20 @@ def merge_lr_pairs(source_pairs, dest_dir, config, unpaired=None):
         orig_name    = f"{stem}{ext}"
         display_name = orig_name if rel_root == "." else os.path.join(rel_root, orig_name)
 
+        # Check if output already exists — same result whether real run or dry run.
+        # Already-done merges don't count as "merged this run" (matches how
+        # individual files that already exist are counted as "skipped", not "converted").
+        if os.path.exists(out_path):
+            logging.info(f"Merge already done, skipping: {display_name}")
+            merged_sources.append((left_src, right_src))
+            continue
+
         if dry_run:
             logging.info(
                 f"[DRY RUN] Would merge: {os.path.basename(left_src)} + "
                 f"{os.path.basename(right_src)} → {display_name}{conv_info}"
             )
             merged_count += 1
-            continue
-
-        if os.path.exists(out_path):
-            logging.info(f"Merge already done, skipping: {display_name}")
-            merged_count += 1
-            merged_sources.append((left_src, right_src))
             continue
 
         os.makedirs(out_dir, exist_ok=True)
