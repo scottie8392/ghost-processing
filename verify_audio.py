@@ -59,8 +59,8 @@ def main():
     bit_depth   = config.get("bit_depth", 24)
     is_float    = str(bit_depth) == "32f"
     depth_part  = "32f" if is_float else f"{bit_depth}b"
-    suffix      = f"{target_rate // 1000}k-{depth_part}"
-    dest_dir    = os.path.join(dest_base, f"{source_name}-{suffix}")
+    suffix      = f"{target_rate // 1000}k{depth_part}"
+    dest_dir    = os.path.join(dest_base, f"{source_name}_{suffix}")
     progress_log = os.path.join(dest_dir, "progress.json")
     rejects_log = os.path.join(dest_dir, "rejects.json")
 
@@ -100,7 +100,7 @@ def main():
         rel = os.path.relpath(source_path, source_dir)
         base, ext = os.path.splitext(rel)
         dest_ext  = ".wav" if (is_float and ext.lower() in (".aif", ".aiff")) else ext
-        dest_path = os.path.join(dest_dir, f"{base}-{suffix}{dest_ext}")
+        dest_path = os.path.join(dest_dir, f"{base}_{suffix}{dest_ext}")
         if not os.path.exists(dest_path):
             missing_dest.append(source_path)
         else:
