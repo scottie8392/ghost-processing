@@ -33,17 +33,19 @@ log.setLevel(logging.ERROR)
 
 app = Flask(__name__)
 
-BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
-PROCESS_SCRIPT = os.path.join(BASE_DIR, "process_audio.py")
-PROFILE_PATH   = os.path.join(BASE_DIR, "profile.json")
-LAST_JOB_PATH  = os.path.join(BASE_DIR, "last_job.json")
-VERSION_FILE   = os.path.join(BASE_DIR, "VERSION")
+BASE_DIR        = os.path.dirname(os.path.abspath(__file__))
+PROCESS_SCRIPT  = os.path.join(BASE_DIR, "process_audio.py")
+PROFILE_PATH    = os.path.join(BASE_DIR, "profile.json")
+LAST_JOB_PATH   = os.path.join(BASE_DIR, "last_job.json")
+HISTORY_PATH    = os.path.join(BASE_DIR, "run_history.json")
+VERSION_FILE    = os.path.join(BASE_DIR, "VERSION")
+VERIFY_SCRIPT   = os.path.join(BASE_DIR, "verify_audio.py")
 
 # Docker detection — /.dockerenv exists in all Docker containers
 _is_docker = os.path.exists("/.dockerenv")
 
 # Version cache — populated at startup
-_version_cache = {"local": None, "remote": None}
+_version_cache = {"local": None, "remote": None, "up_to_date": True}
 
 
 def _get_local_sha():
@@ -68,21 +70,40 @@ def _get_local_sha():
 
 
 def _fetch_remote_sha():
-    """Fetch latest main commit SHA from GitHub API. Returns None on failure."""
+    """Fetch latest main commit SHA from GitHub API. Returns full SHA or None on failure."""
     try:
         req = urllib.request.Request(
             "https://api.github.com/repos/scottie8392/ghost-processing/commits/main",
             headers={"User-Agent": "ghost-processing-version-check"}
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
-            return json.loads(resp.read())["sha"][:7]
+            return json.loads(resp.read())["sha"]  # full SHA for ancestry check
     except Exception:
         return None
 
 
 def _init_version():
-    _version_cache["local"] = _get_local_sha()
-    _version_cache["remote"] = _fetch_remote_sha()
+    local_sha  = _get_local_sha()
+    remote_sha = _fetch_remote_sha()
+    _version_cache["local"]  = local_sha
+    # Store short (7-char) remote SHA for display only
+    _version_cache["remote"] = remote_sha[:7] if remote_sha else None
+
+    # Determine up_to_date: remote is None → can't tell, treat as ok.
+    # Otherwise check if the remote commit is already in local history.
+    # If git knows the remote SHA and it's an ancestor of local main,
+    # local is at or ahead of remote → no update needed.
+    if remote_sha and local_sha not in ("unknown", None):
+        try:
+            r = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", remote_sha, "main"],
+                capture_output=True, cwd=BASE_DIR, timeout=5
+            )
+            _version_cache["up_to_date"] = (r.returncode == 0)
+        except Exception:
+            _version_cache["up_to_date"] = True  # can't check → don't nag
+    else:
+        _version_cache["up_to_date"] = True
 
 threading.Thread(target=_init_version, daemon=True).start()
 
@@ -664,15 +685,23 @@ def run():
             _log_ring.append(done_entry)
             _log_queue.put(done_entry)
             last_job_record = {
-                "name":        job_name,
-                "source":      (_current_job or {}).get("source", ""),
-                "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "status":      job_status,
-                "converted":   converted,
-                "copied":      copied,
-                "rejected":    rejected,
-                "skipped":     skipped,
-                "returncode":  rc,
+                "name":                job_name,
+                "source":              (_current_job or {}).get("source", ""),
+                "finished_at":         time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "status":              job_status,
+                "converted":           converted,
+                "copied":              copied,
+                "merged":              merged,
+                "unpaired":            unpaired,
+                "rejected":            rejected,
+                "skipped":             skipped,
+                "returncode":          rc,
+                # Fields needed for post-run verification
+                "source_dir":          config.get("source_dir", ""),
+                "dest_base":           config.get("dest_base", ""),
+                "target_sample_rate":  config.get("target_sample_rate", 48000),
+                "bit_depth":           config.get("bit_depth", 24),
+                "dry_run":             config.get("dry_run", False),
             }
             try:
                 tmp_path = LAST_JOB_PATH + ".tmp"
@@ -681,6 +710,21 @@ def run():
                 os.replace(tmp_path, LAST_JOB_PATH)
             except Exception:
                 pass
+            # Append to run history (keep last 50 non-dry-run jobs)
+            if not config.get("dry_run", False):
+                try:
+                    history = []
+                    if os.path.exists(HISTORY_PATH):
+                        with open(HISTORY_PATH) as f:
+                            history = json.load(f)
+                    history.append(last_job_record)
+                    history = history[-50:]
+                    tmp_h = HISTORY_PATH + ".tmp"
+                    with open(tmp_h, "w") as f:
+                        json.dump(history, f)
+                    os.replace(tmp_h, HISTORY_PATH)
+                except Exception:
+                    pass
             # macOS Notification Center alert when job finishes
             if sys.platform == "darwin":
                 if rc == 0:
@@ -881,6 +925,80 @@ def status():
     })
 
 
+@app.route("/history")
+def history():
+    """Return run history (last 50 non-dry-run jobs)."""
+    if not os.path.exists(HISTORY_PATH):
+        return jsonify([])
+    try:
+        with open(HISTORY_PATH) as f:
+            return jsonify(json.load(f))
+    except Exception:
+        return jsonify([])
+
+
+@app.route("/verify", methods=["POST"])
+def verify():
+    """
+    Run verify_audio.py --json against the last completed (non-dry-run) job.
+    Returns the structured JSON output from the verifier.
+    """
+    if not os.path.exists(LAST_JOB_PATH):
+        return jsonify({"error": "No completed job found"}), 404
+    try:
+        with open(LAST_JOB_PATH) as f:
+            last_job = json.load(f)
+    except Exception:
+        return jsonify({"error": "Could not read last job record"}), 500
+
+    if last_job.get("dry_run"):
+        return jsonify({"error": "Last job was a dry run — nothing to verify"}), 400
+
+    source_dir = last_job.get("source_dir", "")
+    dest_base  = last_job.get("dest_base", "")
+    rate       = last_job.get("target_sample_rate", 48000)
+    depth      = last_job.get("bit_depth", 24)
+
+    if not source_dir or not dest_base:
+        return jsonify({"error": "Last job record is missing source/dest paths — re-run the job to enable verification"}), 400
+
+    # Build a temp config YAML for verify_audio.py
+    verify_config = {
+        "source_dir":          source_dir,
+        "dest_base":           dest_base,
+        "target_sample_rate":  rate,
+        "bit_depth":           depth,
+    }
+    try:
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
+        yaml.dump(verify_config, tmp)
+        tmp.close()
+
+        python = os.path.join(BASE_DIR, "ghost-processing-venv", "bin", "python")
+        if not os.path.exists(python):
+            python = "python3"
+
+        result = subprocess.run(
+            [python, VERIFY_SCRIPT, "--config", tmp.name, "--json"],
+            capture_output=True, text=True, timeout=300,
+        )
+        os.unlink(tmp.name)
+
+        if result.returncode != 0 and not result.stdout.strip():
+            return jsonify({"error": "Verifier failed: " + (result.stderr or "unknown error")}), 500
+
+        data = json.loads(result.stdout)
+        data["job_name"]    = last_job.get("name", "")
+        data["finished_at"] = last_job.get("finished_at", "")
+        return jsonify(data)
+    except json.JSONDecodeError:
+        return jsonify({"error": "Verifier output could not be parsed"}), 500
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Verification timed out"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/stream")
 def stream():
     def generate():
@@ -918,8 +1036,8 @@ def stream():
 @app.route("/version")
 def version():
     local  = _version_cache["local"] or "unknown"
-    remote = _version_cache["remote"]
-    up_to_date = (remote is None) or (local == "unknown") or (local == remote)
+    remote = _version_cache.get("remote")
+    up_to_date = _version_cache.get("up_to_date", True)
     return jsonify({
         "local_sha":  local,
         "remote_sha": remote,
