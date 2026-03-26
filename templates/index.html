@@ -1398,10 +1398,10 @@
     const m = msg.toLowerCase();
     if (m.startsWith('rejected:') || m.includes('rejecting:') || m.includes('silent file') || m.includes('zero-byte')) {
       addReviewItem(msg, 'rejected');
-    } else if (m.includes('skipping:') || m.includes('already processed')) {
-      addReviewItem(msg, 'skipped');
     } else if (m.startsWith('merged:') || m.includes('[dry run] would merge') || m.startsWith('merge already done')) {
       addReviewItem(msg, 'merged');
+    } else if (m.includes('skipping:') || m.includes('already processed')) {
+      addReviewItem(msg, 'skipped');
     } else if (m.includes('unpaired l/r')) {
       addReviewItem(msg, 'unpaired');
     } else if (m.includes('copied (already at target') || m.includes('[dry run] would copy')) {
