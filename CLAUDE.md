@@ -18,7 +18,7 @@ A personal audio processing pipeline for a music studio. Converts stems (WAV/AIF
 
 ---
 
-## Current State (as of 2026-03-25, Sprint 1.1 + 1.2 + Sprint 2 complete)
+## Current State (as of 2026-03-25, Sprint 1.1 + 1.2 + Sprint 2 + Sprint 4 complete)
 
 The app is **feature-complete and working**. Core pipeline verified by real test runs. All known code bugs fixed. Remote configured at `origin/main`.
 
@@ -52,7 +52,7 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - Per-run timestamped log files in `logs/` AND copied into dest folder alongside `progress.json` and `rejects.json`
 - Auto-verification after batch completes
 - `/browse` endpoint blocks sensitive system directories (path traversal protection)
-- Output naming: `{source_name}-{rate}k-{depth}b/` e.g. `Boston-48k-24b/`, files named `stem-48k-24b.wav`
+- Output naming: `{source_name}_{rate}k{depth}b/` e.g. `Boston_48k24b/`, files named `stem_48k24b.wav` (underscore separator, no dash in suffix)
 
 ### Verified by test run:
 - Local mode: WAV + AIF + AIFF, spaces in filenames, silence rejection, resume, deep folder nesting
@@ -76,6 +76,16 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - NAS mode dest path: local absolute paths (e.g. /Users/scottie/Desktop) used as-is; not mangled through NAS share detection
 - SMB share name vs mount point: uses nasShareRoot (actual share name) not the local folder name which macOS may suffix with -1/-2
 
+### Verified by Sprint 4:
+- L/R combining — `find_lr_source_pairs()` scans source before batch; matched L/R filtered from `batch_process`; `merge_lr_pairs()` merges directly source→dest with `sox -M` + conversion flags in one pass — L/R files never appear in dest
+- Naming convention — `output_suffix()` returns `48k24b` (no dash); separator between basename and suffix is `_` everywhere (`Boston_48k24b/`, `stem_48k24b.wav`)
+- Unpaired L/R — blocked by default; amber `⚠ N unpaired` warning block in completion banner; own section in File Review; `allow_unpaired_lr` Advanced option to pass through as mono
+- Merged log line shows original stem name only (e.g. `Drums/808_15.wav`), not the suffixed output name
+- Dry run log colors unified with real run — `[dry run] would convert/copy/merge` route to same color classes as their real counterparts
+- Version badge false-positive fix — `_get_local_sha()` uses `git rev-parse --short main` not HEAD (prevents false "update available" on feature branches)
+- Arc Raiders color palette applied throughout
+- Layout bug fixed — extra `</div>` had pushed output card outside the container; log was full viewport width
+
 ### Not yet tested:
 - NFS/SMB network drop mid-run
 - Watch mode
@@ -92,8 +102,8 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 
 ## Immediate Next Steps
 
-### Sprint 3 — see BACKLOG.md for candidates
-All 🔴 bugs fixed. Focus shifts to workflow features and quality-of-life improvements.
+### Sprint 5 — see BACKLOG.md for candidates
+All 🔴 bugs fixed. L/R combining complete. Focus on workflow features and quality-of-life improvements.
 
 ---
 
@@ -199,13 +209,16 @@ Per file in `process_file()`:
 | `min_silence_len` hardcoded, removed from UI | pydub gap-bridging parameter is irrelevant for binary keep/reject decisions. Hardcoded to 200ms; only `silence_thresh` and `min_non_silent_len` exposed in Advanced panel. |
 | BWF/BEXT preserved via pure Python RIFF manipulation | SoX strips BEXT chunks. `bwfmetaedit` CLI `--out-core`/`--in-core` round-trip was unreliable. Pure Python `_read_bext_chunk`/`_write_bext_chunk` reads raw BEXT bytes from source WAV RIFF structure and injects into dest — no external tools, guaranteed correct. TimeReference sample count preserved exactly; wall-clock shift on sample rate change is expected behavior. |
 | `_stop_requested` flag for Stop status | `/stop` sets flag before killpg; `run_process` reads it after wait() to write `"stopped"` vs `"error"` — can't use returncode alone since both are non-zero |
-| `output_suffix(rate, depth)` helper | Dest dirs and filenames include both rate and depth e.g. `48k-24b`; prevents collisions across bit depths and makes skip logic unambiguous |
+| `output_suffix(rate, depth)` helper | Returns `48k24b` (no internal dash); separator between basename and suffix is `_` (e.g. `Boston_48k24b/`, `stem_48k24b.wav`); prevents collisions across bit depths and makes skip logic unambiguous |
 | 32f AIF/AIFF → .wav output | AIFF can't encode float; SoX silently falls back to 32i. Force .wav for 32f+AIF sources. Same ext swap mirrored in both verifiers. |
 | Checkboxes as pill toggles | All `input[type="checkbox"]` styled as dark-surface pill toggles with amber knob — default white checkbox breaks dark theme |
 | No tqdm in batch_process | tqdm's `\r` updates (written to stderr, merged into stdout pipe) were corrupting parallel worker log lines via Python universal-newlines `\r`-as-newline. UI has its own phase bar. |
 | "Done:" line as authoritative count | app.py incremental line-parse counts can be wrong when parallel workers write simultaneously. `process_audio.py` batch_process counts from return values and emits a final "Done:" summary — app.py parses this as the definitive numbers for the banner. |
 | `process_file` returns "skipped" string | Distinct from None (rejected) so batch_process can count skipped files separately. Previously both returned None → skipped files inflated the silent count. |
 | Dry run writes nothing | No dest dir, no log files, no progress/rejects JSON. Output is UI-only. dry_run flag never persisted to profile.json — it's a one-off mode. |
+| L/R combining from source | `find_lr_source_pairs(source_dir)` pre-scans source; matched L/R filtered out of `batch_process` skip set; `merge_lr_pairs()` merges directly source→dest using `sox -M left right -b N outpath rate -v RATE dither -s` — L/R files never appear in dest. Unpaired L/R blocked by default; `allow_unpaired_lr` passes them through as mono. |
+| Merged display name | Log and File Review show original stem name (e.g. `Drums/808_15.wav`), not the suffixed output. `addReviewItem` for merged type extracts after last `→` (dry run) or after last `: ` (real run). |
+| Version badge uses main branch SHA | `_get_local_sha()` uses `git rev-parse --short main` not `HEAD` — prevents false "update available" when running on a feature branch during development. |
 
 ---
 
@@ -233,4 +246,4 @@ python verify_audio.py --config config.local.yaml
 
 - Branch: `main`
 - Remote: `origin/main` — `https://github.com/scottie8392/ghost-processing`
-- Working tree: clean as of 2026-03-25 Sprint 2 completion
+- Working tree: clean as of 2026-03-25 Sprint 4 completion
