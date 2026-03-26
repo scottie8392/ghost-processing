@@ -10,8 +10,6 @@ Usage:
     python process_audio.py --config config.docker.yaml
 """
 
-import contextlib
-import io
 import os
 import sys
 import time
@@ -230,11 +228,21 @@ def check_silence(audio_file, silence_thresh, min_silence_len, min_non_silent_le
     """
     try:
         # Suppress pydub/ffmpeg subprocess noise — pydub prints the ffmpeg
-        # command to stdout for non-WAV formats (AIF/AIFF). Redirect at the
-        # Python level so it never reaches the UI log.
-        with contextlib.redirect_stdout(io.StringIO()), \
-             contextlib.redirect_stderr(io.StringIO()):
+        # command directly to fd 1/2 for non-WAV formats (AIF/AIFF).
+        # contextlib.redirect_stdout only redirects Python's sys.stdout;
+        # os.dup2 redirects at the kernel level and catches everything.
+        _devnull = os.open(os.devnull, os.O_WRONLY)
+        _saved_out, _saved_err = os.dup(1), os.dup(2)
+        try:
+            os.dup2(_devnull, 1)
+            os.dup2(_devnull, 2)
             audio = AudioSegment.from_file(audio_file)
+        finally:
+            os.dup2(_saved_out, 1)
+            os.dup2(_saved_err, 2)
+            os.close(_saved_out)
+            os.close(_saved_err)
+            os.close(_devnull)
         non_silent = silence.detect_nonsilent(
             audio, min_silence_len=min_non_silent_len, silence_thresh=silence_thresh
         )
