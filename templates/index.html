@@ -6,16 +6,16 @@
   <title>Ghost Processing</title>
   <style>
     :root {
-      --bg:         #111;
-      --surface:    #1c1c1c;
-      --surface2:   #252525;
-      --border:     #333;
-      --accent:     #f0a030;
-      --text:       #ddd;
-      --text-dim:   #777;
-      --success:    #5a9e5a;
-      --error:      #c85a5a;
-      --warn:       #c89030;
+      --bg:         #0e0f11;
+      --surface:    #18191d;
+      --surface2:   #21232a;
+      --border:     #2e3038;
+      --accent:     #f5a623;
+      --text:       #d8d9dc;
+      --text-dim:   #6a6c75;
+      --success:    #52c462;
+      --error:      #d44d4d;
+      --warn:       #d49428;
       --radius:     6px;
       --mono:       "SF Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
     }
@@ -29,6 +29,7 @@
       font-size: 14px;
       line-height: 1.5;
       padding: 28px 20px;
+      overflow-x: hidden;
     }
 
     .container { max-width: 780px; margin: 0 auto; }
@@ -133,6 +134,7 @@
       border: 1px solid #2e2e2e;
       border-radius: 3px;
       padding: 0 4px;
+      word-break: break-all;
     }
     .hint .ex { display: block; margin-top: 3px; }
 
@@ -401,6 +403,7 @@
     .ll.error    { color: var(--error); }
     .ll.warn     { color: var(--warn); }
     .ll.success  { color: var(--success); }
+    .ll.merged   { color: #2196f3; }
     .ll.dim      { color: #555; }
     .ll.dry-run  { color: var(--accent); opacity: 0.85; }
     .ll.meta     { color: #555; font-style: italic; }
@@ -453,6 +456,7 @@
     }
     .completion-stats .cs-converted { color: var(--success); font-weight: 600; }
     .completion-stats .cs-copied    { color: var(--success); font-weight: 600; }
+    .completion-stats .cs-merged    { color: #2196f3;         font-weight: 600; }
     .completion-stats .cs-rejected  { color: var(--error);   font-weight: 600; }
     .completion-stats .cs-skipped   { color: #666;           font-weight: 600; }
     .completion-stats .cs-sep       { color: #333; }
@@ -634,6 +638,8 @@
     /* Review panel */
     .review-card {
       border-color: #2a2a2a;
+      max-width: 780px;
+      margin: 0 auto;
     }
     .review-header {
       display: flex;
@@ -658,6 +664,17 @@
     }
     .badge-rejected { background: rgba(200,90,90,0.15); color: var(--error); border: 1px solid rgba(200,90,90,0.3); }
     .badge-skipped  { background: rgba(80,80,80,0.2);   color: #666;         border: 1px solid #333; }
+    .badge-merged    { background: rgba(33,150,243,0.15);  color: #2196f3;         border: 1px solid rgba(33,150,243,0.35); }
+    .badge-unpaired  { background: rgba(212,148,40,0.15);  color: var(--warn);     border: 1px solid rgba(212,148,40,0.35); }
+    .review-list li.merged   { color: #2196f3; }
+    .review-list li.unpaired { color: var(--warn); }
+    .review-label-warn { color: var(--warn); }
+    .unpaired-warning {
+      font-size: 12px; font-weight: 600; color: var(--warn);
+      margin-top: 10px; padding: 6px 12px;
+      background: rgba(212,148,40,0.1); border: 1px solid rgba(212,148,40,0.3);
+      border-radius: var(--radius);
+    }
 
     .review-section { margin-bottom: 20px; }
     .review-section:last-child { margin-bottom: 0; }
@@ -823,8 +840,8 @@
       </div>
       <div class="field">
         <label class="field-label" for="combine_lr">Combine L/R Pairs</label>
-        <input type="checkbox" id="combine_lr" style="margin-top:5px;">
-        <div class="hint">Merge Pro Tools mono L/R pairs (e.g. <code>Kick L.wav</code> + <code>Kick R.wav</code>) into a single stereo file after conversion. Unpaired files pass through unchanged.</div>
+        <input type="checkbox" id="combine_lr" style="margin-top:5px;" onchange="toggleUnpairedOption()">
+        <div class="hint">Merge Pro Tools mono L/R pairs (e.g. <code>Kick L.wav</code> + <code>Kick R.wav</code>) into a single stereo file. Unpaired files are blocked by default.</div>
       </div>
     </div>
 
@@ -876,6 +893,17 @@
           <div class="field"></div>
         </div>
 
+        <!-- L/R Options -->
+        <div class="adv-section">
+          <div class="row">
+            <div class="field hidden" id="allow-unpaired-field">
+              <label class="field-label" for="allow_unpaired_lr">Allow Unpaired L/R Through</label>
+              <input type="checkbox" id="allow_unpaired_lr" style="margin-top:5px;">
+              <div class="hint">When a file has no matching partner (e.g. <code>Kick L.wav</code> with no <code>Kick R.wav</code>), convert it as a normal mono file instead of blocking it.</div>
+            </div>
+          </div>
+        </div>
+
         <!-- Watch Mode -->
         <div class="adv-section">
           <div class="row">
@@ -904,6 +932,10 @@
             <label class="field-label" for="verbose">Verbose Logs</label>
             <input type="checkbox" id="verbose" style="margin-top:5px;">
             <div class="hint">Shows every file processed including skips. Useful when a run produces unexpected results and you need to see exactly what happened to each file.</div>
+          </div>
+          <div class="field" style="margin-top:10px;">
+            <label class="field-label">Deep Verification</label>
+            <div class="hint">The built-in post-run check confirms all source files are accounted for. For a deeper audit — MD5 hash verification of every converted file against the source — run <code>python verify_audio.py --config config.local.yaml</code> from the terminal. This re-reads every dest file and will catch corrupted or truncated output. Useful after large batches on a network share.</div>
           </div>
         </div>
 
@@ -942,6 +974,7 @@
         <div class="completion-sub" id="completion-sub"></div>
       </div>
       <div class="completion-stats" id="completion-stats"></div>
+      <div class="unpaired-warning hidden" id="unpaired-warning"></div>
     </div>
 
     <div class="log" id="log">
@@ -956,6 +989,8 @@
       <h2>File Review</h2>
       <span class="badge badge-rejected" id="badge-rejected">0 rejected</span>
       <span class="badge badge-skipped"  id="badge-skipped">0 skipped</span>
+      <span class="badge badge-merged"    id="badge-merged"    style="display:none">0 merged</span>
+      <span class="badge badge-unpaired"  id="badge-unpaired"  style="display:none">0 unpaired</span>
     </div>
 
     <div class="review-section">
@@ -971,6 +1006,24 @@
       <div class="review-label">Skipped — already exist in destination</div>
       <div class="review-scroll">
         <ul class="review-list" id="skipped-list">
+          <li class="review-empty">None this run</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="review-section" id="merged-section" style="display:none">
+      <div class="review-label">Merged — L/R pairs combined to stereo</div>
+      <div class="review-scroll">
+        <ul class="review-list" id="merged-list">
+          <li class="review-empty">None this run</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="review-section" id="unpaired-section" style="display:none">
+      <div class="review-label review-label-warn">Unpaired L/R — no matching partner found</div>
+      <div class="review-scroll">
+        <ul class="review-list" id="unpaired-list">
           <li class="review-empty">None this run</li>
         </ul>
       </div>
@@ -997,6 +1050,13 @@
   const skippedList     = document.getElementById('skipped-list');
   const badgeRejected   = document.getElementById('badge-rejected');
   const badgeSkipped    = document.getElementById('badge-skipped');
+  const badgeMerged     = document.getElementById('badge-merged');
+  const mergedList      = document.getElementById('merged-list');
+  const mergedSection   = document.getElementById('merged-section');
+  const badgeUnpaired   = document.getElementById('badge-unpaired');
+  const unpairedList    = document.getElementById('unpaired-list');
+  const unpairedSection = document.getElementById('unpaired-section');
+  const unpairedWarning = document.getElementById('unpaired-warning');
   const completionBanner = document.getElementById('completion-banner');
   const completionIcon   = document.getElementById('completion-icon');
   const completionTitle  = document.getElementById('completion-title');
@@ -1006,7 +1066,7 @@
   const phaseLabel       = document.getElementById('phase-label');
   const phaseFill        = document.getElementById('phase-fill');
   const phaseCount       = document.getElementById('phase-count');
-  let rejectedCount = 0, skippedCount = 0, convertedCount = 0, copiedCount = 0;
+  let rejectedCount = 0, skippedCount = 0, convertedCount = 0, copiedCount = 0, mergedCount = 0, unpairedCount = 0;
   let totalFiles = 0, liveDoneCount = 0;
 
   function updatePhase() {
@@ -1026,6 +1086,12 @@
     stability_wait_sec: 60,
     log_dir:            '',
   };
+
+  function toggleUnpairedOption() {
+    const on = document.getElementById('combine_lr').checked;
+    document.getElementById('allow-unpaired-field').classList.toggle('hidden', !on);
+    if (!on) document.getElementById('allow_unpaired_lr').checked = false;
+  }
 
   function toggleRunMode() {
     const mode = document.getElementById('run_mode').value;
@@ -1128,6 +1194,7 @@
       dry_run:            document.getElementById('dry_run').checked,
       force_wav:          document.getElementById('force_wav').checked,
       combine_lr:         document.getElementById('combine_lr').checked,
+      allow_unpaired_lr:  document.getElementById('allow_unpaired_lr').checked,
       verbose:            document.getElementById('verbose').checked,
       target_sample_rate: parseInt(document.getElementById('target_sample_rate').value) || 48000,
       bit_depth:          document.getElementById('bit_depth').value,
@@ -1143,10 +1210,17 @@
     logEl.innerHTML = '<div class="log-empty">Output will appear here when processing starts.</div>';
     rejectedList.innerHTML = '<li class="review-empty">None this run</li>';
     skippedList.innerHTML  = '<li class="review-empty">None this run</li>';
-    rejectedCount = 0; skippedCount = 0; convertedCount = 0; copiedCount = 0;
+    mergedList.innerHTML   = '<li class="review-empty">None this run</li>';
+    unpairedList.innerHTML = '<li class="review-empty">None this run</li>';
+    rejectedCount = 0; skippedCount = 0; convertedCount = 0; copiedCount = 0; mergedCount = 0; unpairedCount = 0;
     totalFiles = 0; liveDoneCount = 0;
     badgeRejected.textContent = '0 rejected';
     badgeSkipped.textContent  = '0 skipped';
+    badgeMerged.style.display   = 'none';
+    mergedSection.style.display = 'none';
+    badgeUnpaired.style.display   = 'none';
+    unpairedSection.style.display = 'none';
+    unpairedWarning.classList.add('hidden');
     reviewCard.classList.add('hidden');
     completionBanner.classList.add('hidden');
     phaseRow.classList.add('hidden');
@@ -1186,31 +1260,59 @@
 
   function classify(msg) {
     const m = msg.toLowerCase();
+    if (m.includes('[dry run] would convert:'))              return 'success';
+    if (m.includes('[dry run] would copy:'))                 return 'success';
+    if (m.includes('[dry run] would merge:'))                return 'merged';
     if (m.includes('[dry run]'))                             return 'dry-run';
     if (m.includes('error') || m.includes('failed'))        return 'error';
+    if (m.includes('unpaired l/r'))                         return 'warn';
+    if (m.startsWith('unprocessed:'))                       return 'warn';
     if (m.includes('warning') || m.includes('warn'))        return 'warn';
     if (m.startsWith('converted:') || m.includes('passed')) return 'success';
     if (m.startsWith('copied:'))                             return 'success';
-    if (m.startsWith('merged:'))                             return 'success';
+    if (m.startsWith('merged:'))                             return 'merged';
     if (m.startsWith('rejected:'))                           return 'error';
     if (m.startsWith('checking:') || m.startsWith('analyzing:')) return 'dim';
     if (m.includes('skip') || m.includes('already processed')) return 'dim';
-    if (m.startsWith('session:') || m.startsWith('found ') || m.startsWith('done:') || m.startsWith('run log:') || m.includes('dry run complete') || m.includes('verification') || m.includes('post-run') || m.includes('l/r combining') || m.startsWith('unpaired l/r')) return 'meta';
+    if (m.startsWith('session:') || m.startsWith('found ') || m.startsWith('done:') || m.startsWith('run log:') || m.includes('dry run complete') || m.includes('verification') || m.includes('post-run') || m.includes('l/r combining')) return 'meta';
     return '';
   }
 
   function addReviewItem(text, type) {
-    const list = type === 'rejected' ? rejectedList : skippedList;
+    const list = type === 'rejected' ? rejectedList
+               : type === 'merged'   ? mergedList
+               : type === 'unpaired' ? unpairedList
+               : skippedList;
     const empty = list.querySelector('.review-empty');
     if (empty) empty.remove();
     const li = document.createElement('li');
     li.className = type;
-    const match = text.match(/^[^:]+:\s*(.+?)(?:\s{2,}|$)/i);
-    li.textContent = match ? match[1].trim() : text;
+    let display;
+    if (type === 'merged') {
+      // Strip conv_info "  (fmt → fmt)" then take everything after the last "→ " if present
+      const stripped = text.replace(/\s{2,}\(.*$/, '');
+      const arrow = stripped.lastIndexOf('→ ');
+      display = arrow !== -1 ? stripped.slice(arrow + 2).trim()
+                             : (stripped.match(/:\s*(.+)$/) || ['', stripped])[1].trim();
+    } else {
+      const match = text.match(/^[^:]+:\s*(.+?)(?:\s{2,}|$)/i);
+      display = match ? match[1].trim() : text;
+    }
+    li.textContent = display;
     list.appendChild(li);
     if (type === 'rejected') {
       rejectedCount++;
       badgeRejected.textContent = rejectedCount + ' rejected';
+    } else if (type === 'merged') {
+      mergedCount++;
+      badgeMerged.textContent = mergedCount + ' merged';
+      badgeMerged.style.display = '';
+      mergedSection.style.display = '';
+    } else if (type === 'unpaired') {
+      unpairedCount++;
+      badgeUnpaired.textContent = unpairedCount + ' unpaired';
+      badgeUnpaired.style.display = '';
+      unpairedSection.style.display = '';
     } else {
       skippedCount++;
       badgeSkipped.textContent = skippedCount + ' skipped';
@@ -1224,6 +1326,10 @@
       addReviewItem(msg, 'rejected');
     } else if (m.includes('skipping:') || m.includes('already processed')) {
       addReviewItem(msg, 'skipped');
+    } else if (m.startsWith('merged:') || m.includes('[dry run] would merge')) {
+      addReviewItem(msg, 'merged');
+    } else if (m.includes('unpaired l/r')) {
+      addReviewItem(msg, 'unpaired');
     } else if (m.includes('copied (already at target') || m.includes('[dry run] would copy')) {
       copiedCount++;
     } else if (m.includes('converted:') || m.includes('[dry run] would convert:')) {
@@ -1231,7 +1337,7 @@
     }
   }
 
-  function showCompletion(name, status, converted, copied, rejected, skipped, isDryRun, finishedAt = null) {
+  function showCompletion(name, status, converted, copied, merged, unpaired, rejected, skipped, isDryRun, finishedAt = null) {
     const ok      = status === 'done';
     const stopped = status === 'stopped';
     const bannerClass = isDryRun ? 'dry-run' : (ok ? 'done' : (stopped ? 'stopped' : 'error'));
@@ -1251,12 +1357,22 @@
     if (copied > 0) {
       stats += `<span class="cs-sep">·</span><span class="cs-copied">${copied} copied</span>`;
     }
+    if (merged > 0) {
+      stats += `<span class="cs-sep">·</span><span class="cs-merged">${merged} merged</span>`;
+    }
     stats +=
       `<span class="cs-sep">·</span>` +
       `<span class="cs-rejected">${rejected} silent</span>` +
       `<span class="cs-sep">·</span>` +
       `<span class="cs-skipped">${skipped} skipped</span>`;
     completionStats.innerHTML = stats;
+    if (unpaired > 0) {
+      const noun = unpaired === 1 ? 'file' : 'files';
+      unpairedWarning.textContent = `⚠  ${unpaired} unpaired L/R ${noun} — no matching partner found`;
+      unpairedWarning.classList.remove('hidden');
+    } else {
+      unpairedWarning.classList.add('hidden');
+    }
     completionBanner.classList.remove('hidden');
   }
 
@@ -1346,6 +1462,8 @@
         copiedCount    = data.copied    ?? copiedCount;
         rejectedCount  = data.rejected  ?? rejectedCount;
         skippedCount   = data.skipped   ?? skippedCount;
+        if (data.merged   > 0) mergedCount   = data.merged;
+        if (data.unpaired > 0) unpairedCount = data.unpaired;
       } else if (data.type === 'done') {
         _streamDone = true;
         const isDryRun  = !!data.dry_run;
@@ -1356,7 +1474,7 @@
         const statusTxt = isDryRun ? 'Dry Run' : baseLabel;
         const dotState  = isDryRun ? 'dry-run' : (ok ? 'done' : (stopped ? 'stopped' : 'error'));
         setStatus(dotState, statusTxt);
-        showCompletion(data.job_name || '', jobStatus, convertedCount, copiedCount, rejectedCount, skippedCount, isDryRun);
+        showCompletion(data.job_name || '', jobStatus, convertedCount, copiedCount, mergedCount, unpairedCount, rejectedCount, skippedCount, isDryRun);
         lastRunChip.classList.add('hidden'); // banner replaces chip while visible
         phaseRow.classList.add('hidden');
         btnRun.disabled = false; btnStop.disabled = true;
@@ -1905,7 +2023,9 @@
       setVal('max_workers',  p.max_workers  != null ? p.max_workers : 6);
       // dry_run intentionally not restored — should always default to off
       setChk('force_wav',    p.force_wav);
-      setChk('combine_lr',   p.combine_lr);
+      setChk('combine_lr',      p.combine_lr);
+      setChk('allow_unpaired_lr', p.allow_unpaired_lr);
+      toggleUnpairedOption();
       setChk('verbose',      p.verbose);
 
       setSel('target_sample_rate', p.target_sample_rate != null ? p.target_sample_rate : 48000);

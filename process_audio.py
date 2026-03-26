@@ -207,13 +207,13 @@ def output_suffix(target_rate, bit_depth):
     """Return the combined rate+depth suffix used in dest dir and file names.
 
     Examples:
-        48000, 24   → "48k-24b"
-        44100, 16   → "44k-16b"
-        96000, "32f" → "96k-32f"
+        48000, 24    → "48k24b"
+        44100, 16    → "44k16b"
+        96000, "32f" → "96k32f"
     """
     rate_part  = f"{target_rate // 1000}k"
     depth_part = "32f" if str(bit_depth) == "32f" else f"{bit_depth}b"
-    return f"{rate_part}-{depth_part}"
+    return f"{rate_part}{depth_part}"
 
 
 def check_silence(audio_file, silence_thresh, min_silence_len, min_non_silent_len):
@@ -417,7 +417,7 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
             is_float = str(bit_depth) == "32f"
             force_wav = config.get("force_wav", False)
             dest_ext  = ".wav" if (force_wav or (is_float and ext.lower() in (".aif", ".aiff"))) else ext
-            dest_path = os.path.join(dest_dir, f"{base}-{suffix}{dest_ext}")
+            dest_path = os.path.join(dest_dir, f"{base}_{suffix}{dest_ext}")
             if not config.get("dry_run"):
                 os.makedirs(os.path.dirname(dest_path), exist_ok=True)
 
@@ -554,7 +554,7 @@ def batch_process(files, config, rejects_log, progress_log, dest_dir):
 # Post-run verification
 # ---------------------------------------------------------------------------
 
-def run_verification(config, dest_dir, progress_log, rejects_log):
+def run_verification(config, dest_dir, progress_log, rejects_log, lr_exclude=None):
     """
     Quick post-run check: confirms all source files are accounted for in
     progress.json or rejects.json. Logs warnings if anything is missing.
@@ -580,7 +580,9 @@ def run_verification(config, dest_dir, progress_log, rejects_log):
     n_copied        = sum(1 for d in progress.values() if d.get("status") == "copied")
     n_skipped       = sum(1 for d in progress.values() if d.get("status") == "skipped_rate")
     rejected_sources = set(rejects)
-    unprocessed = source_files - (all_processed | rejected_sources)
+    # L/R files handled by merge pipeline are intentionally absent from progress.json
+    lr_accounted = set(lr_exclude) if lr_exclude else set()
+    unprocessed = source_files - (all_processed | rejected_sources | lr_accounted)
 
     target_rate = config.get("target_sample_rate", 48000)
     bit_depth   = config.get("bit_depth", 24)
@@ -594,7 +596,7 @@ def run_verification(config, dest_dir, progress_log, rejects_log):
         # Mirror the extension logic used during conversion
         force_wav = config.get("force_wav", False)
         dest_ext  = ".wav" if (force_wav or (is_float and ext.lower() in (".aif", ".aiff"))) else ext
-        dest_path = os.path.join(dest_dir, f"{base}-{suffix}{dest_ext}")
+        dest_path = os.path.join(dest_dir, f"{base}_{suffix}{dest_ext}")
         if not os.path.exists(dest_path):
             missing_dest.append(rel)
 
@@ -614,101 +616,133 @@ def run_verification(config, dest_dir, progress_log, rejects_log):
 # L/R stereo combining
 # ---------------------------------------------------------------------------
 
-def find_lr_pairs(scan_dir, suffix, dry_run=False):
+def find_lr_source_pairs(source_dir):
     """
-    Walk scan_dir and find matched L/R mono pairs produced by Pro Tools.
+    Scan source_dir for L/R mono pairs (Pro Tools convention: 'stem L.ext' / 'stem R.ext').
 
-    Real run: scans dest_dir for converted files ending in ' L-{suffix}.ext'
-    Dry run:  scans source_dir for original files ending in ' L.ext'
-              (nothing has been written to dest yet)
-
-    Returns (pairs, unpaired) where pairs = [(left, right, merged_name), ...].
+    Returns (lr_source_paths, pairs, unpaired) where:
+    - lr_source_paths: set of absolute source paths to exclude from batch_process
+    - pairs: list of (left_path, right_path, stem, ext, root)
+    - unpaired: list of source paths with no matching partner
     """
-    left_files = {}
+    left_files  = {}
     right_files = {}
-    lr_suffix = f"-{suffix}" if not dry_run else ""
 
-    for root, _, files in os.walk(scan_dir):
+    for root, _, files in os.walk(source_dir):
         for fname in files:
             if not is_audio_file(fname):
                 continue
             name, ext = os.path.splitext(fname)
-            if name.endswith(f" L{lr_suffix}"):
-                stem = name[: -len(f" L{lr_suffix}")]
-                key = (root, stem, ext)
+            if name.endswith(" L"):
+                stem = name[:-2]
+                key = (root, stem, ext.lower())
                 left_files[key] = os.path.join(root, fname)
-            elif name.endswith(f" R{lr_suffix}"):
-                stem = name[: -len(f" R{lr_suffix}")]
-                key = (root, stem, ext)
+            elif name.endswith(" R"):
+                stem = name[:-2]
+                key = (root, stem, ext.lower())
                 right_files[key] = os.path.join(root, fname)
 
-    pairs = []
-    unpaired = []
-    all_keys = set(left_files) | set(right_files)
-    for key in all_keys:
+    pairs           = []
+    unpaired        = []
+    lr_source_paths = set()
+    for key in set(left_files) | set(right_files):
         root, stem, ext = key
         if key in left_files and key in right_files:
-            merged = os.path.join(root, f"{stem}-{suffix}{ext}") if not dry_run else f"{stem}-{suffix}{ext}"
-            pairs.append((left_files[key], right_files[key], merged))
+            lr_source_paths.add(left_files[key])
+            lr_source_paths.add(right_files[key])
+            pairs.append((left_files[key], right_files[key], stem, ext, root))
         elif key in left_files:
             unpaired.append(left_files[key])
         else:
             unpaired.append(right_files[key])
 
-    return pairs, unpaired
+    return lr_source_paths, pairs, unpaired
 
 
-def merge_lr_pairs(dest_dir, config):
-    """Merge matched L/R mono pairs into stereo files using SoX. Runs after verification."""
-    if not config.get("combine_lr"):
-        return 0
+def merge_lr_pairs(source_pairs, dest_dir, config, unpaired=None):
+    """
+    Merge L/R source pairs directly to dest using SoX -M with conversion.
 
+    L/R mono files are never written to dest — they are merged from source in
+    one SoX pass, so the destination only ever contains the stereo output.
+    """
+    source_dir  = config.get("source_dir", "")
+
+    if not config.get("combine_lr") or not source_pairs:
+        unpaired_count = len(unpaired) if unpaired else 0
+        if unpaired:
+            for path in unpaired:
+                rel = os.path.relpath(path, source_dir) if source_dir else os.path.basename(path)
+                logging.warning(f"Unpaired L/R — no matching partner: {rel}")
+        return 0, unpaired_count
     target_rate = config.get("target_sample_rate", 48000)
     bit_depth   = config.get("bit_depth", 24)
     suffix      = output_suffix(target_rate, bit_depth)
+    is_float    = str(bit_depth) == "32f"
+    force_wav   = config.get("force_wav", False)
     dry_run     = config.get("dry_run", False)
 
-    scan_dir = config.get("source_dir", dest_dir) if dry_run else dest_dir
-    pairs, unpaired = find_lr_pairs(scan_dir, suffix, dry_run=dry_run)
-    if not pairs and not unpaired:
-        return 0
+    logging.info(f"--- L/R combining: {len(source_pairs)} pair(s) ---")
+    merged_count  = 0
+    dest_fmt_str  = f"{fmt_rate(target_rate)}/{fmt_depth(bit_depth)}"
 
-    logging.info(f"--- L/R combining: {len(pairs)} pair(s) ---")
-    merged_count = 0
+    for left_src, right_src, stem, ext, root in source_pairs:
+        out_ext  = ".wav" if (force_wav or (is_float and ext in (".aif", ".aiff"))) else ext
+        out_name = f"{stem}_{suffix}{out_ext}"
+        rel_root = os.path.relpath(root, source_dir)
+        out_dir  = dest_dir if rel_root == "." else os.path.join(dest_dir, rel_root)
+        out_path = os.path.join(out_dir, out_name)
 
-    for left, right, merged in pairs:
-        merged_name = merged if dry_run else os.path.basename(merged)
-        rel = merged if dry_run else os.path.relpath(merged, dest_dir)
+        # Get source format for unified log display
+        src_rate    = get_sample_rate(left_src)
+        src_bits    = get_bit_depth(left_src)
+        src_fmt_str = f"{fmt_rate(src_rate)}/{fmt_depth(src_bits)}"
+        conv_info   = f"  ({src_fmt_str} → {dest_fmt_str})"
+
+        # Display name: original stem + ext (no suffix), with subdir prefix if nested
+        orig_name    = f"{stem}{ext}"
+        display_name = orig_name if rel_root == "." else os.path.join(rel_root, orig_name)
+
         if dry_run:
             logging.info(
-                f"[DRY RUN] Would merge: {os.path.basename(left)} + "
-                f"{os.path.basename(right)} → {merged_name}"
+                f"[DRY RUN] Would merge: {os.path.basename(left_src)} + "
+                f"{os.path.basename(right_src)} → {display_name}{conv_info}"
             )
             merged_count += 1
             continue
-        if os.path.exists(merged):
-            logging.info(f"Merge already done, skipping: {rel}")
+
+        if os.path.exists(out_path):
+            logging.info(f"Merge already done, skipping: {display_name}")
             merged_count += 1
             continue
+
+        os.makedirs(out_dir, exist_ok=True)
+        depth_str = "32" if is_float else str(bit_depth)
+        fmt_opts  = ["-b", depth_str]
+        if is_float:
+            fmt_opts += ["-e", "floating-point"]
+        effects = ["rate", "-v", str(target_rate)]
+        if not is_float:
+            effects += ["dither", "-s"]
+        sox_cmd = ["sox", "-M", left_src, right_src] + fmt_opts + [out_path] + effects
+
         try:
-            result = subprocess.run(
-                ["sox", "-M", left, right, merged],
-                capture_output=True, text=True
-            )
+            result = subprocess.run(sox_cmd, capture_output=True, text=True)
             if result.returncode == 0:
-                os.remove(left)
-                os.remove(right)
-                logging.info(f"Merged: {rel}")
+                logging.info(f"Merged: {display_name}{conv_info}")
                 merged_count += 1
             else:
-                logging.error(f"Merge failed: {rel} — {result.stderr.strip()}")
+                logging.error(f"Merge failed: {out_name} — {result.stderr.strip()}")
         except Exception as e:
-            logging.error(f"Merge error: {rel} — {e}")
+            logging.error(f"Merge error: {out_name} — {e}")
 
-    for path in unpaired:
-        logging.warning(f"Unpaired L/R — no matching partner: {os.path.basename(path)}")
+    unpaired_count = len(unpaired) if unpaired else 0
+    if unpaired:
+        for path in unpaired:
+            rel = os.path.relpath(path, source_dir) if source_dir else os.path.basename(path)
+            logging.warning(f"Unpaired L/R — no matching partner: {rel}")
 
-    return merged_count
+    return merged_count, unpaired_count
 
 
 # ---------------------------------------------------------------------------
@@ -794,7 +828,7 @@ def main():
     target_rate = config.get("target_sample_rate", 48000)
     bit_depth   = config.get("bit_depth", 24)
     suffix      = output_suffix(target_rate, bit_depth)
-    dest_dir    = os.path.join(config["dest_base"], f"{source_name}-{suffix}")
+    dest_dir    = os.path.join(config["dest_base"], f"{source_name}_{suffix}")
     dry_run     = config.get("dry_run", False)
 
     if not dry_run:
@@ -828,29 +862,50 @@ def main():
     else:
         logging.info(f"Session: {source_name}  →  {suffix}")
         files = collect_files(config["source_dir"])
+
+        # Pre-scan for L/R pairs so they are never individually written to dest.
+        # Matched L/R files are excluded from batch_process and merged directly
+        # from source in one SoX pass after verification.
+        lr_source_pairs = []
+        lr_unpaired     = []
+        lr_exclude = set()
+        if config.get("combine_lr"):
+            lr_skip, lr_source_pairs, lr_unpaired = find_lr_source_pairs(config["source_dir"])
+            skip_set = set(lr_skip)
+            # By default, block unpaired L/R files from converting as mono.
+            # Set allow_unpaired_lr: true in config to let them through.
+            if lr_unpaired and not config.get("allow_unpaired_lr", False):
+                skip_set |= set(lr_unpaired)
+            files = [f for f in files if f not in skip_set]
+            # Track all L/R-excluded paths so verification doesn't flag them as unprocessed
+            lr_exclude = skip_set
+
         logging.info(f"Found {len(files)} audio files")
         try:
             converted, copied, rejected, skipped = batch_process(files, config, rejects_log, progress_log, dest_dir)
-            elapsed = time.time() - start_time
-            parts = [f"{converted} converted"]
-            if copied:   parts.append(f"{copied} copied")
-            if rejected: parts.append(f"{rejected} silent")
-            if skipped:  parts.append(f"{skipped} skipped")
-            summary = f"Done: {', '.join(parts)} in {elapsed:.1f}s"
-            logging.info(summary)
         except KeyboardInterrupt:
             shutdown_event.set()
 
-        # Auto-verification after batch (skipped in dry run — nothing was written)
+        # Auto-verification then L/R merge
+        unprocessed = missing = 0
+        if not config.get("dry_run"):
+            unprocessed, missing = run_verification(config, dest_dir, progress_log, rejects_log, lr_exclude=lr_exclude)
+        merged, unpaired_count = merge_lr_pairs(lr_source_pairs, dest_dir, config, lr_unpaired)
+
+        elapsed = time.time() - start_time
+        parts = [f"{converted} converted"]
+        if copied:          parts.append(f"{copied} copied")
+        if merged:          parts.append(f"{merged} merged")
+        if unpaired_count:  parts.append(f"{unpaired_count} unpaired")
+        if rejected:        parts.append(f"{rejected} silent")
+        if skipped:         parts.append(f"{skipped} skipped")
+        logging.info(f"Done: {', '.join(parts)} in {elapsed:.1f}s")
+
         if config.get("dry_run"):
-            merge_lr_pairs(dest_dir, config)
             logging.info("Dry run complete — no files written.")
         else:
-            unprocessed, missing = run_verification(config, dest_dir, progress_log, rejects_log)
-            merge_lr_pairs(dest_dir, config)
             if unprocessed > 0 or missing > 0:
                 print(f"WARNING: {unprocessed} unprocessed, {missing} missing dest files.")
-                print("Run verify_audio.py for a full report.")
             else:
                 print("Verification passed — all files accounted for.")
 

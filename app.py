@@ -56,8 +56,10 @@ def _get_local_sha():
         except Exception:
             pass
     try:
+        # Use the main branch SHA, not HEAD — avoids false "update available"
+        # when running from a feature branch whose HEAD differs from main.
         r = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
+            ["git", "rev-parse", "--short", "main"],
             capture_output=True, text=True, cwd=BASE_DIR, timeout=5
         )
         return r.stdout.strip() or "unknown"
@@ -92,6 +94,7 @@ DEFAULT_PROFILE = {
     "dry_run": False,
     "force_wav": False,
     "combine_lr": False,
+    "allow_unpaired_lr": False,
     "verbose": False,
     "target_sample_rate": 48000,
     "bit_depth": 24,
@@ -512,7 +515,8 @@ def run():
         "max_workers": int(data.get("max_workers", 6)),
         "dry_run": bool(data.get("dry_run", False)),
         "force_wav":  bool(data.get("force_wav", False)),
-        "combine_lr": bool(data.get("combine_lr", False)),
+        "combine_lr":         bool(data.get("combine_lr", False)),
+        "allow_unpaired_lr":  bool(data.get("allow_unpaired_lr", False)),
         "verbose": bool(data.get("verbose", False)),
         "target_sample_rate": int(data.get("target_sample_rate", 48000)),
         "bit_depth": data.get("bit_depth", 24),
@@ -544,7 +548,7 @@ def run():
 
     def run_process():
         global _active_process, _is_running, _current_job
-        converted = rejected = skipped = copied = 0
+        converted = rejected = skipped = copied = merged = unpaired = 0
         job_name  = (_current_job or {}).get("name", "Job")
         try:
             python = os.path.join(BASE_DIR, "ghost-processing-venv", "bin", "python")
@@ -571,6 +575,10 @@ def run():
                     if m: converted = int(m.group(1))
                     m = re.search(r'(\d+) copied', clean)
                     copied = int(m.group(1)) if m else 0
+                    m = re.search(r'(\d+) merged', clean)
+                    merged = int(m.group(1)) if m else 0
+                    m = re.search(r'(\d+) unpaired', clean)
+                    unpaired = int(m.group(1)) if m else 0
                     m = re.search(r'(\d+) silent', clean)
                     rejected = int(m.group(1)) if m else 0
                     m = re.search(r'(\d+) skipped', clean)
@@ -591,10 +599,12 @@ def run():
 
             # Emit verified summary counts before done
             summary_entry = {
-                "type": "summary",
-                "job_name": job_name,
+                "type":      "summary",
+                "job_name":  job_name,
                 "converted": converted,
                 "copied":    copied,
+                "merged":    merged,
+                "unpaired":  unpaired,
                 "rejected":  rejected,
                 "skipped":   skipped,
             }

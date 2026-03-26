@@ -124,6 +124,7 @@ These cover the gap between "job ran while browser/laptop was closed" and "user 
 - [ ] **Folder exclude patterns** — option to skip subdirectories by name pattern (e.g. "Bounce", "Reference", "Archive"). Avoids accidentally converting non-stem files mixed into the session folder.
 - [ ] **Multiple source dirs** — accept a list of source paths in one run rather than one at a time.
 - [ ] **Source folder file preview** — once a valid source path is entered, show a collapsible file tree of the audio files found inside (including nested subdirectories). Lets you confirm you're pointing at the right session without leaving the app. Uses the existing `/browse` endpoint or a new `/scan` endpoint that returns only audio files. Shows count per subfolder, total file count, and file names — mirrors what the log will show when the job runs.
+- [ ] **Deep verification UI** — `verify_audio.py` performs MD5 hash verification of every converted file against its source (catches corrupted or truncated output). Currently CLI-only (`python verify_audio.py --config config.local.yaml`). Add a "Verify Last Run" button in the Advanced section that runs the script against the most recent job and streams the result into the log panel. Useful after large batches on a network share where silent write failures are possible.
 
 ### Audio Quality
 - [ ] **AIFF output option** — some studios deliver stems as AIFF. Add an output format dropdown (WAV / AIFF) alongside sample rate and bit depth.
