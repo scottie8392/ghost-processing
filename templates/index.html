@@ -704,6 +704,23 @@
     .review-list li.rejected { color: var(--error); }
     .review-list li.skipped  { color: #555; }
     .review-empty { font-size: 11px; color: #383838; font-style: italic; }
+
+    /* Run History */
+    #history-table td { padding: 5px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    #history-table tr:last-child td { border-bottom: none; }
+    .hr-name  { color: var(--text);     font-weight: 500; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .hr-when  { color: var(--text-dim); white-space: nowrap; }
+    .hr-stats { color: #666; }
+    .hr-ok    { color: var(--success); }
+    .hr-stop  { color: var(--warn); }
+    .hr-err   { color: var(--error); }
+
+    /* Verify result */
+    .verify-ok    { color: var(--success); font-size: 12px; }
+    .verify-warn  { color: var(--warn);    font-size: 12px; }
+    .verify-err   { color: var(--error);   font-size: 12px; }
+    .verify-stat  { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+    .verify-list  { font-size: 11px; color: var(--error); margin: 4px 0 0 12px; }
   </style>
 </head>
 <body>
@@ -936,7 +953,9 @@
           </div>
           <div class="field" style="margin-top:10px;">
             <label class="field-label">Deep Verification</label>
-            <div class="hint">The built-in post-run check confirms all source files are accounted for. For a deeper audit — MD5 hash verification of every converted file against the source — run <code>python verify_audio.py --config config.local.yaml</code> from the terminal. This re-reads every dest file and will catch corrupted or truncated output. Useful after large batches on a network share.</div>
+            <div class="hint" style="margin-bottom:8px;">MD5-checks every converted file against the source to catch corrupted or truncated output. Reads all dest files — takes a few seconds on a local drive, longer on NAS.</div>
+            <button class="btn-reset" id="btn-verify" onclick="verifyLastRun()" style="margin-top:0">Verify Last Run</button>
+            <div id="verify-result" style="display:none; margin-top:10px;"></div>
           </div>
         </div>
 
@@ -1032,6 +1051,22 @@
 
   </div>
 
+  <!-- Run History -->
+  <div class="card hidden" id="history-card">
+    <div class="review-header" style="cursor:pointer" onclick="toggleHistory()">
+      <h2>Run History</h2>
+      <span class="badge badge-skipped" id="history-badge" style="margin-left:auto"></span>
+      <span id="history-toggle-icon" style="color:var(--text-dim); font-size:12px; margin-left:8px;">▾</span>
+    </div>
+    <div id="history-body">
+      <div class="review-scroll" style="max-height:320px;">
+        <table id="history-table" style="width:100%; border-collapse:collapse; font-size:12px;">
+          <tbody id="history-rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -1069,13 +1104,39 @@
   const phaseCount       = document.getElementById('phase-count');
   let rejectedCount = 0, skippedCount = 0, convertedCount = 0, copiedCount = 0, mergedCount = 0, unpairedCount = 0;
   let totalFiles = 0, liveDoneCount = 0;
+  let _jobStartTime = null;
+  let _activityTimer = null;
 
   function updatePhase() {
     if (totalFiles === 0) return;
-    phaseLabel.textContent = 'Processing';
     const pct = Math.round((liveDoneCount / totalFiles) * 100);
     phaseFill.style.width = pct + '%';
     phaseCount.textContent = liveDoneCount + '/' + totalFiles;
+
+    // ETA calculation
+    if (_jobStartTime && liveDoneCount > 0 && liveDoneCount < totalFiles) {
+      const elapsed = (Date.now() - _jobStartTime) / 1000; // seconds
+      const rate    = liveDoneCount / elapsed;              // files/sec
+      const eta     = Math.round((totalFiles - liveDoneCount) / rate);
+      let etaStr;
+      if (eta < 60)        etaStr = eta + 's';
+      else if (eta < 3600) etaStr = Math.floor(eta / 60) + 'm ' + (eta % 60) + 's';
+      else                 etaStr = Math.floor(eta / 3600) + 'h ' + Math.floor((eta % 3600) / 60) + 'm';
+      phaseLabel.textContent = 'Processing · ETA ' + etaStr;
+    } else {
+      phaseLabel.textContent = 'Processing';
+    }
+  }
+
+  function _resetActivityTimer() {
+    if (_activityTimer) clearTimeout(_activityTimer);
+    _activityTimer = setTimeout(() => {
+      addLine('⚠  No activity for 60 seconds — job may be frozen or stalled on a large file.', 'warn');
+    }, 60000);
+  }
+
+  function _clearActivityTimer() {
+    if (_activityTimer) { clearTimeout(_activityTimer); _activityTimer = null; }
   }
 
   const DEFAULTS = {
@@ -1237,7 +1298,8 @@
     mergedList.innerHTML   = '<li class="review-empty">None this run</li>';
     unpairedList.innerHTML = '<li class="review-empty">None this run</li>';
     rejectedCount = 0; skippedCount = 0; convertedCount = 0; copiedCount = 0; mergedCount = 0; unpairedCount = 0;
-    totalFiles = 0; liveDoneCount = 0;
+    totalFiles = 0; liveDoneCount = 0; _jobStartTime = null;
+    _clearActivityTimer();
     badgeRejected.textContent = '0 rejected';
     badgeSkipped.textContent  = '0 skipped';
     badgeMerged.style.display   = 'none';
@@ -1466,6 +1528,7 @@
     es.onmessage = (e) => {
       const data = JSON.parse(e.data);
       if (data.type === 'log') {
+        _resetActivityTimer();
         const cleanMsg = data.message.replace(_logPrefixRe, '');
         addLine(cleanMsg, classify(cleanMsg));
         checkReviewLine(cleanMsg);
@@ -1473,7 +1536,11 @@
         const ml = cleanMsg.toLowerCase();
         if (!totalFiles) {
           const m = ml.match(/found (\d+) audio files/);
-          if (m) { totalFiles = parseInt(m[1]); phaseRow.classList.remove('hidden'); }
+          if (m) {
+            totalFiles = parseInt(m[1]);
+            _jobStartTime = Date.now();
+            phaseRow.classList.remove('hidden');
+          }
         }
         if (ml.startsWith('converted:') || ml.includes('[dry run] would convert:') ||
             ml.startsWith('copied:')    || ml.includes('[dry run] would copy:')    ||
@@ -1492,6 +1559,7 @@
         if (data.unpaired > 0) unpairedCount = data.unpaired;
       } else if (data.type === 'done') {
         _streamDone = true;
+        _clearActivityTimer();
         const isDryRun  = !!data.dry_run;
         const jobStatus = data.status || (data.returncode === 0 ? 'done' : 'error');
         const ok        = jobStatus === 'done';
@@ -1536,7 +1604,107 @@
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // Verify Last Run
+  // ---------------------------------------------------------------------------
+  async function verifyLastRun() {
+    const btn    = document.getElementById('btn-verify');
+    const result = document.getElementById('verify-result');
+    btn.disabled = true;
+    btn.textContent = 'Verifying…';
+    result.style.display = 'block';
+    result.innerHTML = '<span class="verify-stat">Running verification — this may take a moment…</span>';
+
+    try {
+      const res  = await fetch('/verify', { method: 'POST' });
+      const data = await res.json();
+      if (data.error) {
+        result.innerHTML = `<span class="verify-err">✗ ${data.error}</span>`;
+        return;
+      }
+
+      const allGood = data.unprocessed === 0 && data.missing_dest === 0 && data.hash_mismatches === 0;
+      const icon  = allGood ? '✓' : '✗';
+      const cls   = allGood ? 'verify-ok' : 'verify-err';
+      const label = allGood ? 'Verification passed' : 'Verification found issues';
+
+      let html = `<span class="${cls}">${icon} ${label}</span>`;
+      html += `<div class="verify-stat">${data.source_files} source files · ${data.converted} converted · ${data.rejected} rejected · ${data.unprocessed} unprocessed · ${data.missing_dest} missing dest · ${data.hash_mismatches} hash mismatches</div>`;
+
+      if (data.missing_dest_files && data.missing_dest_files.length) {
+        html += `<div class="verify-warn" style="margin-top:6px;">Missing dest files:</div>`;
+        html += `<ul class="verify-list">${data.missing_dest_files.map(f => `<li>${f}</li>`).join('')}</ul>`;
+      }
+      if (data.unprocessed_files && data.unprocessed_files.length) {
+        html += `<div class="verify-warn" style="margin-top:6px;">Unprocessed source files:</div>`;
+        html += `<ul class="verify-list">${data.unprocessed_files.map(f => `<li>${f}</li>`).join('')}</ul>`;
+      }
+      if (data.hash_mismatch_files && data.hash_mismatch_files.length) {
+        html += `<div class="verify-warn" style="margin-top:6px;">Hash mismatches (source changed?):</div>`;
+        html += `<ul class="verify-list">${data.hash_mismatch_files.map(f => `<li>${f}</li>`).join('')}</ul>`;
+      }
+      result.innerHTML = html;
+    } catch (e) {
+      result.innerHTML = `<span class="verify-err">✗ ${e.message}</span>`;
+    } finally {
+      btn.disabled    = false;
+      btn.textContent = 'Verify Last Run';
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Run History
+  // ---------------------------------------------------------------------------
+  let _historyOpen = true;
+
+  function toggleHistory() {
+    _historyOpen = !_historyOpen;
+    document.getElementById('history-body').style.display = _historyOpen ? '' : 'none';
+    document.getElementById('history-toggle-icon').textContent = _historyOpen ? '▾' : '▸';
+  }
+
+  async function loadHistory() {
+    try {
+      const res  = await fetch('/history');
+      const rows = await res.json();
+      if (!rows || rows.length === 0) return;
+
+      const card  = document.getElementById('history-card');
+      const tbody = document.getElementById('history-rows');
+      const badge = document.getElementById('history-badge');
+      badge.textContent = rows.length + ' run' + (rows.length !== 1 ? 's' : '');
+      tbody.innerHTML   = '';
+
+      // Most recent first
+      [...rows].reverse().forEach(job => {
+        const ok      = job.status === 'done';
+        const stopped = job.status === 'stopped';
+        const statusCls   = ok ? 'hr-ok' : (stopped ? 'hr-stop' : 'hr-err');
+        const statusLabel = ok ? '✓' : (stopped ? '◼' : '✗');
+
+        const when = job.finished_at
+          ? new Date(job.finished_at).toLocaleString([], {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})
+          : '';
+
+        const copiedPart  = job.copied  > 0 ? ` / ${job.copied} copied`  : '';
+        const mergedPart  = job.merged  > 0 ? ` / ${job.merged} merged`  : '';
+        const stats = `${job.converted ?? '?'} converted${copiedPart}${mergedPart} · ${job.rejected ?? 0} silent · ${job.skipped ?? 0} skipped`;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          `<td class="hr-name" title="${job.name || ''}">${job.name || '—'}</td>` +
+          `<td class="hr-when">${when}</td>` +
+          `<td><span class="${statusCls}">${statusLabel}</span></td>` +
+          `<td class="hr-stats">${stats}</td>`;
+        tbody.appendChild(tr);
+      });
+
+      card.classList.remove('hidden');
+    } catch (e) { /* history is non-critical */ }
+  }
+
   async function stopRun() {
+    _clearActivityTimer();
     await fetch('/stop', { method: 'POST' });
     addLine('— Stopped by user —', 'warn');
     setStatus('', 'Stopped');
@@ -2139,6 +2307,9 @@
         showLastRunChip(data.last_job);
       }
     } catch (e) { /* ignore */ }
+
+    // Load run history panel
+    loadHistory();
   })();
 </script>
 </body>
