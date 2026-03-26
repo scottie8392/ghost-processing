@@ -18,7 +18,7 @@ A personal audio processing pipeline for a music studio. Converts stems (WAV/AIF
 
 ---
 
-## Current State (as of 2026-03-25, Sprint 1.1 + 1.2 + Sprint 2 + Sprint 4 + Sprint 5 complete)
+## Current State (as of 2026-03-26, Sprint 1.1 + 1.2 + Sprint 2 + Sprint 4 + Sprint 5 + Sprint 6 complete)
 
 The app is **feature-complete and working**. Core pipeline verified by real test runs. All known code bugs fixed. Remote configured at `origin/main`.
 
@@ -70,11 +70,19 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - Dry run mode: no files written, all counts correct, amber banner, format matches real run
 - Force WAV output toggle — forces all output to .wav regardless of source format
 - Silence detection now runs on ALL files before copy or convert — silent files never reach destination regardless of format
-- Progress bar tracks live file completions (liveDoneCount); label "Processing X/N"
+- Progress bar tracks live file completions (liveDoneCount); label "Processing X/N · ETA Xm Ys"
 - Log rotation — keeps 10 most recent run_*.log files in logs/; oldest pruned on each run
 - Stop button SIGKILL escalation — SIGTERM + SIGKILL after 5s for workers blocked on SMB/NFS I/O
 - NAS mode dest path: local absolute paths (e.g. /Users/scottie/Desktop) used as-is; not mangled through NAS share detection
 - SMB share name vs mount point: uses nasShareRoot (actual share name) not the local folder name which macOS may suffix with -1/-2
+
+### Verified by Sprint 6:
+- Frozen job watchdog — 60s inactivity warning line in log if no SSE events; clears on done/stop
+- Realistic ETA — phase bar shows "Processing · ETA Xm Ys" once rate is established; hides when done
+- Verify Last Run button in Advanced panel — POST /verify runs verify_audio.py --json; shows pass/fail, file counts, lists of issues
+- Run history card — `run_history.json` (max 50, dry runs excluded); GET /history; collapsible card loads on page init, most recent first
+- `last_job.json` now includes `source_dir`, `dest_base`, `target_sample_rate`, `bit_depth`, `merged`, `unpaired` (needed by verifier and history)
+- Version check fixed — uses `git merge-base --is-ancestor <remote_sha> main` instead of SHA string comparison; no false "update available" when local main is ahead of GitHub
 
 ### Verified by Sprint 5:
 - pydub/ffmpeg subprocess noise suppressed — fd-level redirect (os.dup2) silences ffmpeg command strings from AIF decode
@@ -89,7 +97,7 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - Unpaired L/R — blocked by default; amber `⚠ N unpaired` warning block in completion banner; own section in File Review; `allow_unpaired_lr` Advanced option to pass through as mono
 - Merged log line shows original stem name only (e.g. `Drums/808_15.wav`), not the suffixed output name
 - Dry run log colors unified with real run — `[dry run] would convert/copy/merge` route to same color classes as their real counterparts
-- Version badge false-positive fix — `_get_local_sha()` uses `git rev-parse --short main` not HEAD (prevents false "update available" on feature branches)
+- Version badge false-positive fix — `_get_local_sha()` uses `git rev-parse --short main` not HEAD (prevents false "update available" on feature branches); Sprint 6 further improved to use `git merge-base --is-ancestor` so local-ahead-of-remote never triggers badge
 - Arc Raiders color palette applied throughout
 - Layout bug fixed — extra `</div>` had pushed output card outside the container; log was full viewport width
 
@@ -109,8 +117,8 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 
 ## Immediate Next Steps
 
-### Sprint 6 — see BACKLOG.md for candidates
-All 🔴 bugs fixed. L/R combining, verbose mode, config validation, save-as-defaults all complete.
+### Sprint 7 — see BACKLOG.md for candidates
+All 🔴 bugs fixed. Sprint 6 (observability) complete.
 
 ---
 
@@ -130,6 +138,7 @@ ghost-processing/
 ├── config.docker.yaml      # Docker config — gitignored
 ├── profile.json            # UI settings persistence — gitignored
 ├── last_job.json           # Last job result — gitignored
+├── run_history.json        # Append-only run log (max 50 entries) — gitignored
 ├── running_job.pid         # PID file for orphan detection (planned) — gitignored
 ├── logs/                   # Central run logs — gitignored
 └── BACKLOG.md              # Project management, bugs, test checklist, decisions log
@@ -155,7 +164,9 @@ _current_job     = None          # {"name": str, "source": str} set when a job s
 | `/stream` | GET | SSE log stream (replays ring buffer first) |
 | `/status` | GET | `{"running": bool, "current_job": dict, "last_job": dict}` |
 | `/browse` | GET | Server-side directory browser (blocks sensitive system paths) |
-| `/profile` | GET | Load UI settings |
+| `/profile` | GET/POST | Load / save UI settings |
+| `/history` | GET | Run history (last 50 non-dry-run jobs from `run_history.json`) |
+| `/verify` | POST | Run `verify_audio.py --json` against last job; returns structured result |
 | `/connect` | POST | NFS showmount / SMB TCP test + optional mount |
 | `/disconnect` | POST | Unmount NAS share |
 | `/shares` | GET | List NFS exports or SMB shares |
@@ -234,6 +245,11 @@ _current_job     = None          # {"name": str, "source": str} set when a job s
 | L/R combining from source | `find_lr_source_pairs(source_dir)` pre-scans source; matched L/R filtered out of `batch_process` skip set; `merge_lr_pairs()` merges directly source→dest using `sox -M left right -b N outpath rate -v RATE dither -s` — L/R files never appear in dest. Unpaired L/R blocked by default; `allow_unpaired_lr` passes them through as mono. |
 | Merged display name | Log and File Review show original stem name (e.g. `Drums/808_15.wav`), not the suffixed output. `addReviewItem` for merged type extracts after last `→` (dry run) or after last `: ` (real run). |
 | Version badge uses main branch SHA | `_get_local_sha()` uses `git rev-parse --short main` not `HEAD` — prevents false "update available" when running on a feature branch during development. |
+| Version ancestry check | `_init_version()` runs `git merge-base --is-ancestor <remote_full_sha> main` after fetching remote — correctly detects local-ahead-of-remote (no nag) vs genuinely missing remote commits (show badge). Simple SHA string comparison fails when local has unpushed commits. |
+| Verify uses temp config YAML | `/verify` builds a minimal YAML (source_dir, dest_base, rate, depth) and passes to `verify_audio.py --json`; last_job.json now stores these fields. Dry-run jobs return 400 — nothing to verify. |
+| Run history excludes dry runs | Dry runs write nothing to disk; including them in history would inflate the count with non-jobs. Max 50 entries; append + trim on each real completion. |
+| ETA from live rate | `_jobStartTime` set when `Found N audio files` arrives; `updatePhase()` divides elapsed by completions to get files/sec, projects remaining. No ETA shown until first file completes (rate = 0 would divide by zero). |
+| Watchdog as JS setTimeout | 60s `setTimeout` reset on every SSE log event. Fires a warning line — doesn't stop the job. Cleared on done/stop/reset. Server-side watchdog would require more state; JS is sufficient since the symptom (frozen log) is visible to the user. |
 
 ---
 
