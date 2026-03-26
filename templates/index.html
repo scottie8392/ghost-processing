@@ -850,7 +850,8 @@
       <summary>Advanced</summary>
       <div class="detail-body">
 
-        <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:12px;">
+          <button class="btn-reset" id="btn-save-defaults" onclick="saveDefaults()">↓ Save as defaults</button>
           <button class="btn-reset" onclick="resetToDefaults()">↺ Reset to defaults</button>
         </div>
 
@@ -1166,6 +1167,23 @@
   function toggleWatchFields() {
     const on = document.getElementById('watch_mode').checked;
     document.getElementById('field_stability_wait').style.visibility = on ? 'visible' : 'hidden';
+  }
+
+  async function saveDefaults() {
+    const btn = document.getElementById('btn-save-defaults');
+    const orig = btn.textContent;
+    try {
+      await fetch('/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(getConfig()),
+      });
+      btn.textContent = '✓ Saved';
+      setTimeout(() => { btn.textContent = orig; }, 1800);
+    } catch (e) {
+      btn.textContent = '✗ Failed';
+      setTimeout(() => { btn.textContent = orig; }, 1800);
+    }
   }
 
   function resetToDefaults() {

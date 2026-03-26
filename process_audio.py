@@ -10,6 +10,8 @@ Usage:
     python process_audio.py --config config.docker.yaml
 """
 
+import contextlib
+import io
 import os
 import sys
 import time
@@ -227,7 +229,12 @@ def check_silence(audio_file, silence_thresh, min_silence_len, min_non_silent_le
     Returns -inf for a truly silent file, None on decode error.
     """
     try:
-        audio = AudioSegment.from_file(audio_file)
+        # Suppress pydub/ffmpeg subprocess noise — pydub prints the ffmpeg
+        # command to stdout for non-WAV formats (AIF/AIFF). Redirect at the
+        # Python level so it never reaches the UI log.
+        with contextlib.redirect_stdout(io.StringIO()), \
+             contextlib.redirect_stderr(io.StringIO()):
+            audio = AudioSegment.from_file(audio_file)
         non_silent = silence.detect_nonsilent(
             audio, min_silence_len=min_non_silent_len, silence_thresh=silence_thresh
         )
