@@ -736,6 +736,9 @@ def merge_lr_pairs(source_pairs, dest_dir, config, unpaired=None):
     logging.info(f"--- L/R combining: {len(source_pairs)} pair(s) ---")
     merged_count  = 0
     dest_fmt_str  = f"{fmt_rate(target_rate)}/{fmt_depth(bit_depth)}"
+    # Track source files processed by the merge pipeline for progress.json
+    merged_sources   = []  # (left_src, right_src) for each completed/already-done pair
+    unpaired_sources = []  # blocked unpaired source paths
 
     for left_src, right_src, stem, ext, root in source_pairs:
         out_ext  = ".wav" if (force_wav or (is_float and ext in (".aif", ".aiff"))) else ext
@@ -765,6 +768,7 @@ def merge_lr_pairs(source_pairs, dest_dir, config, unpaired=None):
         if os.path.exists(out_path):
             logging.info(f"Merge already done, skipping: {display_name}")
             merged_count += 1
+            merged_sources.append((left_src, right_src))
             continue
 
         os.makedirs(out_dir, exist_ok=True)
@@ -782,6 +786,7 @@ def merge_lr_pairs(source_pairs, dest_dir, config, unpaired=None):
             if result.returncode == 0:
                 logging.info(f"Merged: {display_name}{conv_info}")
                 merged_count += 1
+                merged_sources.append((left_src, right_src))
             else:
                 logging.error(f"Merge failed: {out_name} — {result.stderr.strip()}")
         except Exception as e:
@@ -792,6 +797,30 @@ def merge_lr_pairs(source_pairs, dest_dir, config, unpaired=None):
         for path in unpaired:
             rel = os.path.relpath(path, source_dir) if source_dir else os.path.basename(path)
             logging.warning(f"Unpaired L/R — no matching partner: {rel}")
+            unpaired_sources.append(path)
+
+    # Write L/R source files into progress.json so verify_audio.py can account for them.
+    # Without this, merged/unpaired source files look "unprocessed" to the verifier.
+    if not dry_run and (merged_sources or unpaired_sources) and dest_dir:
+        progress_log = os.path.join(dest_dir, "progress.json")
+        try:
+            progress = {}
+            if os.path.exists(progress_log):
+                with open(progress_log) as f:
+                    progress = json.load(f)
+            for left_src, right_src in merged_sources:
+                for src in (left_src, right_src):
+                    rel = os.path.relpath(src, source_dir) if source_dir else os.path.basename(src)
+                    progress[rel] = {"status": "merged"}
+            for src in unpaired_sources:
+                rel = os.path.relpath(src, source_dir) if source_dir else os.path.basename(src)
+                progress[rel] = {"status": "unpaired"}
+            tmp_path = progress_log + ".tmp"
+            with open(tmp_path, "w") as f:
+                json.dump(progress, f, indent=2)
+            os.replace(tmp_path, progress_log)
+        except Exception as e:
+            logging.warning(f"Could not update progress.json with L/R entries: {e}")
 
     return merged_count, unpaired_count
 

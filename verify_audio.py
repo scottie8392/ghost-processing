@@ -83,9 +83,13 @@ def main():
             except json.JSONDecodeError:
                 print("WARNING: rejects.json is corrupted")
 
-    converted_sources = {os.path.join(source_dir, rel): data for rel, data in progress.items()}
+    all_progress = {os.path.join(source_dir, rel): data for rel, data in progress.items()}
     rejected_sources = set(rejects)
-    processed = set(converted_sources) | rejected_sources
+    # Split progress entries by status so verifier can report them accurately
+    converted_sources = {p: d for p, d in all_progress.items() if d.get("status") in ("converted", "copied")}
+    merged_sources    = {p: d for p, d in all_progress.items() if d.get("status") == "merged"}
+    unpaired_sources  = {p: d for p, d in all_progress.items() if d.get("status") == "unpaired"}
+    processed = set(all_progress) | rejected_sources
     unprocessed = source_files - processed
 
     # Check destination files and hashes
@@ -95,8 +99,6 @@ def main():
     hash_mismatches = []
 
     for source_path, data in converted_sources.items():
-        if data.get("status") not in ("converted", "copied"):
-            continue
         rel = os.path.relpath(source_path, source_dir)
         base, ext = os.path.splitext(rel)
         dest_ext  = ".wav" if (is_float and ext.lower() in (".aif", ".aiff")) else ext
@@ -111,13 +113,15 @@ def main():
 
     if args.json:
         summary = {
-            "source_files": len(source_files),
-            "converted": len(converted_sources),
-            "rejected": len(rejected_sources),
-            "unprocessed": len(unprocessed),
-            "missing_dest": len(missing_dest),
-            "hash_mismatches": len(hash_mismatches),
-            "unprocessed_files": sorted(unprocessed),
+            "source_files":       len(source_files),
+            "converted":          len(converted_sources),
+            "merged":             len(merged_sources),
+            "unpaired":           len(unpaired_sources),
+            "rejected":           len(rejected_sources),
+            "unprocessed":        len(unprocessed),
+            "missing_dest":       len(missing_dest),
+            "hash_mismatches":    len(hash_mismatches),
+            "unprocessed_files":  sorted(unprocessed),
             "missing_dest_files": sorted(missing_dest),
             "hash_mismatch_files": sorted(hash_mismatches),
         }
@@ -127,7 +131,7 @@ def main():
     print(f"Source files found: {len(source_files)}")
 
     if unprocessed:
-        print(f"\nWARNING: {len(unprocessed)} unprocessed files:")
+        print(f"\nWARNING: {len(unprocessed)} unprocessed files (not accounted for):")
         for f in sorted(unprocessed):
             print(f"  - {f}")
     else:
@@ -149,6 +153,10 @@ def main():
 
     print(f"\nSummary:")
     print(f"  Converted:       {len(converted_sources)}")
+    if merged_sources:
+        print(f"  Merged (L/R):    {len(merged_sources)} source files")
+    if unpaired_sources:
+        print(f"  Unpaired (L/R):  {len(unpaired_sources)} blocked (no matching partner)")
     print(f"  Rejected:        {len(rejected_sources)}")
     print(f"  Unprocessed:     {len(unprocessed)}")
     print(f"  Missing dest:    {len(missing_dest)}")
