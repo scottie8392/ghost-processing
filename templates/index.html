@@ -1298,7 +1298,8 @@
     if (m.startsWith('rejected:'))                           return 'error';
     if (m.startsWith('checking:') || m.startsWith('analyzing:')) return 'dim';
     if (m.includes('skip') || m.includes('already processed')) return 'dim';
-    if (m.trimStart().startsWith('sox:')) return 'dim';
+    if (m.trimStart().startsWith('sox:') || m.trimStart().startsWith('source:') ||
+        m.trimStart().startsWith('dest:') || m.trimStart().startsWith('silence:')) return 'dim';
     if (m.startsWith('session:') || m.startsWith('found ') || m.startsWith('done:') || m.startsWith('run log:') || m.includes('dry run complete') || m.includes('verification') || m.includes('post-run') || m.includes('l/r combining')) return 'meta';
     return '';
   }
