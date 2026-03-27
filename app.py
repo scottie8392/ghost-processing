@@ -702,6 +702,7 @@ def run():
         "stability_wait_sec": int(data.get("stability_wait_sec", 60)),
         "watch_mode": bool(data.get("watch_mode", False)),
         "enable_script_remount": bool(data.get("enable_script_remount", False)),
+        "auto_verify": bool(data.get("auto_verify", False)),
         # Pass NAS info so process_audio.py can remount if needed
         "mount_type": data.get("nas_protocol") if data.get("nas_ip") else None,
         "nfs_server_path": (
