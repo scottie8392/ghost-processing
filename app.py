@@ -74,7 +74,12 @@ def _check_orphan_on_startup():
         os.kill(pid, 0)   # signal 0 — just checks existence, doesn't kill
         _orphan_state = {"pid": pid, "status": "alive"}
     except (ProcessLookupError, PermissionError):
-        # ProcessLookupError → process gone; PermissionError → exists but owned by another user
+        # Main process is gone but workers may still be lingering —
+        # attempt a silent process group kill to clean them up.
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass  # group already gone, nothing to do
         _orphan_state = {"pid": pid, "status": "unclean"}
         try:
             os.unlink(PID_PATH)
@@ -1041,20 +1046,44 @@ def status():
     })
 
 
+def _kill_process_group(pid):
+    """
+    Kill an entire process group rooted at pid.
+    Because process_audio.py is launched with start_new_session=True,
+    it is a session/group leader so its PGID == its PID.
+    This kills the main process AND all worker processes it spawned,
+    even if the main process has already exited.
+    Returns True if anything was killed.
+    """
+    killed = False
+    # SIGTERM the whole group first
+    try:
+        os.killpg(pid, signal.SIGTERM)
+        killed = True
+    except (ProcessLookupError, PermissionError):
+        pass
+    # Give workers 3s then SIGKILL anything still alive
+    def _escalate():
+        import time as _time
+        _time.sleep(3)
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    threading.Thread(target=_escalate, daemon=True).start()
+    return killed
+
+
 @app.route("/orphan/kill", methods=["POST"])
 def orphan_kill():
-    """Kill the orphaned process and clear orphan state."""
+    """Kill the orphaned process group and clear orphan state."""
     global _orphan_state
     if not _orphan_state:
         return jsonify({"ok": True, "message": "No orphan to kill"})
     pid = _orphan_state.get("pid")
     killed = False
     if pid:
-        try:
-            os.kill(pid, signal.SIGTERM)
-            killed = True
-        except (ProcessLookupError, PermissionError):
-            pass  # already gone
+        killed = _kill_process_group(pid)
         try:
             os.unlink(PID_PATH)
         except Exception:
