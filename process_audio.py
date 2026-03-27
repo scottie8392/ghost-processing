@@ -461,12 +461,16 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                     progress = {}
             if rel_path in progress and progress[rel_path].get("status") in ("converted", "copied"):
                 src_hash = file_hash(file_path)
+                stored_dest_hash = progress[rel_path].get("dest_hash")
                 if os.path.exists(dest_path) and src_hash == progress[rel_path].get("source_hash"):
-                    if config.get("verbose"):
-                        logging.info(f"Skipped: {rel_path}  (already in dest, hash {src_hash[:8]})")
+                    if stored_dest_hash and file_hash(dest_path) != stored_dest_hash:
+                        logging.info(f"Re-converting: {rel_path}  (dest file corrupted — hash mismatch)")
                     else:
-                        logging.info(f"Skipped: {rel_path}  (already in dest)")
-                    return "skipped"
+                        if config.get("verbose"):
+                            logging.info(f"Skipped: {rel_path}  (already in dest, hash {src_hash[:8]})")
+                        else:
+                            logging.info(f"Skipped: {rel_path}  (already in dest)")
+                        return "skipped"
 
             t0 = time.time()
             sample_rate = get_sample_rate(file_path)

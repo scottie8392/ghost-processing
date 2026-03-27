@@ -824,11 +824,26 @@ def run():
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                         text=True, bufsize=1,
                     )
+                    _v_hash_mismatches = 0
+                    _v_missing_dest    = 0
                     for vline in v_proc.stdout:
-                        entry = {"type": "log", "message": vline.rstrip()}
+                        stripped = vline.rstrip()
+                        entry = {"type": "log", "message": stripped}
                         _log_ring.append(entry)
                         _log_queue.put(entry)
+                        if "\u2717 HASH MISMATCH" in stripped:
+                            _v_hash_mismatches += 1
+                        elif "\u2717 MISSING" in stripped:
+                            _v_missing_dest += 1
                     v_proc.wait()
+                    if _v_hash_mismatches > 0 or _v_missing_dest > 0:
+                        vr_entry = {
+                            "type":            "verify_result",
+                            "hash_mismatches": _v_hash_mismatches,
+                            "missing_dest":    _v_missing_dest,
+                        }
+                        _log_ring.append(vr_entry)
+                        _log_queue.put(vr_entry)
                 except Exception as ve:
                     _log_queue.put({"type": "log", "message": f"Verification error: {ve}"})
                 finally:

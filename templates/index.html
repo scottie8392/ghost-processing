@@ -1046,6 +1046,7 @@
       </div>
       <div class="completion-stats" id="completion-stats"></div>
       <div class="unpaired-warning hidden" id="unpaired-warning"></div>
+      <div class="unpaired-warning hidden" id="verify-warning"></div>
     </div>
 
     <div class="log" id="log">
@@ -1092,7 +1093,7 @@
     </div>
 
     <div class="review-section" id="unpaired-section" style="display:none">
-      <div class="review-label review-label-warn">Unpaired L/R — no matching partner found</div>
+      <div class="review-label review-label-warn">L/R held back — no partner found</div>
       <div class="review-scroll">
         <ul class="review-list" id="unpaired-list">
           <li class="review-empty">None this run</li>
@@ -1145,6 +1146,7 @@
   const unpairedList    = document.getElementById('unpaired-list');
   const unpairedSection = document.getElementById('unpaired-section');
   const unpairedWarning = document.getElementById('unpaired-warning');
+  const verifyWarning   = document.getElementById('verify-warning');
   const completionBanner = document.getElementById('completion-banner');
   const completionIcon   = document.getElementById('completion-icon');
   const completionTitle  = document.getElementById('completion-title');
@@ -1156,6 +1158,7 @@
   const phaseCount       = document.getElementById('phase-count');
   let rejectedCount = 0, skippedCount = 0, convertedCount = 0, copiedCount = 0, mergedCount = 0, unpairedCount = 0;
   let totalFiles = 0, liveDoneCount = 0;
+  let _verifyIssues = null;
   let _activityTimer = null;
 
   function updatePhase() {
@@ -1355,6 +1358,8 @@
     badgeUnpaired.style.display   = 'none';
     unpairedSection.style.display = 'none';
     unpairedWarning.classList.add('hidden');
+    verifyWarning.classList.add('hidden');
+    _verifyIssues = null;
     reviewCard.classList.add('hidden');
     completionBanner.classList.add('hidden');
     phaseRow.classList.add('hidden');
@@ -1399,18 +1404,22 @@
     if (m.includes('[dry run] would merge:'))                return 'merged';
     if (m.includes('[dry run]'))                             return 'dry-run';
     if (m.includes('error') || m.includes('failed'))        return 'error';
-    if (m.includes('unpaired l/r'))                         return 'warn';
+    if (m.startsWith('verify:') && msg.includes('\u2717'))  return 'error';
+    if (m.includes('verification found issues'))            return 'warn';
+    if (m.startsWith('verify:') && msg.includes('\u2713'))  return 'dim';
+    if (m.includes('unpaired l/r') || m.includes('held back')) return 'warn';
     if (m.startsWith('unprocessed:'))                       return 'warn';
     if (m.includes('warning') || m.includes('warn'))        return 'warn';
     if (m.startsWith('converted:') || m.includes('passed')) return 'success';
     if (m.startsWith('copied:'))                             return 'success';
     if (m.startsWith('merged:'))                             return 'merged';
     if (m.startsWith('rejected:'))                           return 'error';
+    if (m.startsWith('re-converting:'))                            return 'warn';
     if (m.startsWith('checking:') || m.startsWith('analyzing:')) return 'dim';
     if (m.includes('skip') || m.includes('already processed')) return 'dim';
     if (m.trimStart().startsWith('sox:') || m.trimStart().startsWith('source:') ||
         m.trimStart().startsWith('dest:') || m.trimStart().startsWith('silence:')) return 'dim';
-    if (m.startsWith('session:') || m.startsWith('found ') || m.startsWith('done:') || m.startsWith('run log:') || m.includes('dry run complete') || m.includes('verification') || m.includes('post-run') || m.includes('l/r combining')) return 'meta';
+    if (m.startsWith('session:') || m.startsWith('found ') || m.startsWith('done:') || m.startsWith('run log:') || m.startsWith('—') || m.includes('dry run complete') || m.includes('verification') || m.includes('post-run') || m.includes('l/r combining')) return 'meta';
     return '';
   }
 
@@ -1506,10 +1515,25 @@
     completionStats.innerHTML = stats;
     if (unpaired > 0) {
       const noun = unpaired === 1 ? 'file' : 'files';
-      unpairedWarning.textContent = `⚠  ${unpaired} unpaired L/R ${noun} — no matching partner found`;
+      unpairedWarning.textContent = `⚠  ${unpaired} L/R ${noun} held back — no partner found`;
       unpairedWarning.classList.remove('hidden');
     } else {
       unpairedWarning.classList.add('hidden');
+    }
+    if (_verifyIssues && (_verifyIssues.hash_mismatches > 0 || _verifyIssues.missing_dest > 0)) {
+      const parts = [];
+      if (_verifyIssues.hash_mismatches > 0) {
+        const n = _verifyIssues.hash_mismatches;
+        parts.push(`${n} corrupted output file${n !== 1 ? 's' : ''}`);
+      }
+      if (_verifyIssues.missing_dest > 0) {
+        const n = _verifyIssues.missing_dest;
+        parts.push(`${n} missing output file${n !== 1 ? 's' : ''}`);
+      }
+      verifyWarning.textContent = `⚠  ${parts.join(', ')} — check the log for details`;
+      verifyWarning.classList.remove('hidden');
+    } else {
+      verifyWarning.classList.add('hidden');
     }
     completionBanner.classList.remove('hidden');
   }
@@ -1632,6 +1656,8 @@
         skippedCount   = data.skipped   ?? skippedCount;
         if (data.merged   > 0) mergedCount   = data.merged;
         if (data.unpaired > 0) unpairedCount = data.unpaired;
+      } else if (data.type === 'verify_result') {
+        _verifyIssues = data;
       } else if (data.type === 'done') {
         _streamDone = true;
         _clearActivityTimer();
