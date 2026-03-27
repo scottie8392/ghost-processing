@@ -176,6 +176,8 @@ DEFAULT_PROFILE = {
     "enable_script_remount": False,
     "run_mode": "nas",
     "saved_sources": [],
+    # Notifications
+    "slack_webhook_url": "",
 }
 
 # Runtime state
@@ -856,6 +858,49 @@ def run():
                          f'with title "Ghost Processing" sound name "Glass"'],
                         timeout=5, capture_output=True,
                     )
+                except Exception:
+                    pass
+
+            # Slack webhook notification (all platforms, including Docker)
+            slack_url = (data.get("slack_webhook_url") or "").strip()
+            if slack_url and not config.get("dry_run", False):
+                try:
+                    if rc == 0:
+                        status_icon, status_text = "✅", "complete"
+                    elif _stop_requested:
+                        status_icon, status_text = "⏹", "stopped"
+                    else:
+                        status_icon, status_text = "❌", "finished with errors"
+
+                    parts = []
+                    if converted: parts.append(f"{converted} converted")
+                    if copied:    parts.append(f"{copied} copied")
+                    if merged:    parts.append(f"{merged} merged")
+                    if rejected:  parts.append(f"{rejected} silent")
+                    if skipped:   parts.append(f"{skipped} skipped")
+                    counts = " • ".join(parts) if parts else "no files processed"
+
+                    payload = {
+                        "blocks": [
+                            {
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": (
+                                        f"{status_icon} *Ghost Processing — {job_name} {status_text}*\n"
+                                        f"{counts}"
+                                    )
+                                }
+                            }
+                        ]
+                    }
+                    req = urllib.request.Request(
+                        slack_url,
+                        data=json.dumps(payload).encode(),
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    urllib.request.urlopen(req, timeout=10)
                 except Exception:
                     pass
         except Exception as e:

@@ -952,6 +952,16 @@
 
         <!-- Watch Mode -->
         <div class="adv-section">
+          <!-- Notifications -->
+          <div class="adv-section">
+            <div class="field">
+              <label class="field-label">Slack Webhook URL</label>
+              <input type="text" id="slack_webhook_url"
+                     placeholder="https://hooks.slack.com/services/…">
+              <div class="hint">Post a message to Slack when a job finishes. Paste your Incoming Webhook URL here. Leave blank to disable. <a href="https://api.slack.com/messaging/webhooks" target="_blank" rel="noopener" style="color:var(--accent)">How to create one →</a></div>
+            </div>
+          </div>
+
           <div class="row">
             <div class="field">
               <label class="field-label" for="watch_mode">Watch Mode</label>
@@ -1173,6 +1183,7 @@
     watch_mode:         false,
     stability_wait_sec: 60,
     log_dir:            '',
+    slack_webhook_url:  '',
   };
 
   function toggleUnpairedOption() {
@@ -1288,6 +1299,7 @@
     setChk('watch_mode',         p.watch_mode);
     setVal('stability_wait_sec', p.stability_wait_sec != null ? p.stability_wait_sec : DEFAULTS.stability_wait_sec);
     setVal('log_dir',            p.log_dir            || DEFAULTS.log_dir);
+    setVal('slack_webhook_url',  p.slack_webhook_url  || '');
     toggleWatchFields();
   }
 
@@ -1314,6 +1326,7 @@
       watch_mode:         document.getElementById('watch_mode').checked,
       stability_wait_sec: parseInt(document.getElementById('stability_wait_sec').value) || 60,
       log_dir:            document.getElementById('log_dir').value.trim(),
+      slack_webhook_url:  document.getElementById('slack_webhook_url').value.trim(),
     };
   }
 
@@ -2364,6 +2377,7 @@
       setChk('watch_mode',         p.watch_mode);
       setVal('stability_wait_sec', p.stability_wait_sec != null ? p.stability_wait_sec : 60);
       setVal('log_dir',            p.log_dir            || '');
+      setVal('slack_webhook_url',  p.slack_webhook_url  || '');
       setSel('run_mode', p.run_mode || 'nas');
 
       // NAS connection history datalist
