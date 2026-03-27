@@ -423,6 +423,28 @@
     }
 
     /* ── Completion banner ─────────────────────────────────────── */
+    .orphan-banner {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 12px 16px;
+      border-radius: var(--radius);
+      margin-bottom: 14px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .orphan-banner.alive   { background: rgba(240,160,48,0.1); border: 1px solid rgba(240,160,48,0.35); }
+    .orphan-banner.unclean { background: rgba(140,140,140,0.08); border: 1px solid rgba(140,140,140,0.25); }
+    .orphan-icon { font-size: 16px; margin-top: 1px; flex-shrink: 0; }
+    .orphan-msg  { flex: 1; color: var(--text); }
+    .orphan-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+    .orphan-btn { padding: 4px 12px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.15);
+                  background: rgba(255,255,255,0.06); color: var(--text); cursor: pointer;
+                  font-size: 12px; transition: background 0.15s; }
+    .orphan-btn:hover { background: rgba(255,255,255,0.12); }
+    .orphan-btn.kill { border-color: rgba(200,80,80,0.4); color: #e07070; }
+    .orphan-btn.kill:hover { background: rgba(200,80,80,0.12); }
+
     .completion-banner {
       display: flex;
       flex-direction: column;
@@ -990,6 +1012,13 @@
       <span class="phase-label" id="phase-label">Detecting silence</span>
       <div class="phase-track"><div class="phase-fill" id="phase-fill"></div></div>
       <span class="phase-count" id="phase-count"></span>
+    </div>
+
+    <!-- Orphan warning — shown if a previous job's process is still running or ended uncleanly -->
+    <div class="orphan-banner hidden" id="orphan-banner">
+      <span class="orphan-icon" id="orphan-icon"></span>
+      <span class="orphan-msg" id="orphan-msg"></span>
+      <div class="orphan-actions" id="orphan-actions"></div>
     </div>
 
     <!-- Completion banner — shown when job finishes or on reconnect -->
@@ -2232,6 +2261,51 @@
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Orphan process warning
+  // ---------------------------------------------------------------------------
+  function showOrphanBanner(orphan) {
+    const banner  = document.getElementById('orphan-banner');
+    const iconEl  = document.getElementById('orphan-icon');
+    const msgEl   = document.getElementById('orphan-msg');
+    const actEl   = document.getElementById('orphan-actions');
+    if (!banner || !orphan) return;
+
+    if (orphan.status === 'alive') {
+      banner.className = 'orphan-banner alive';
+      iconEl.textContent = '⚠';
+      msgEl.innerHTML = `<strong>A conversion job from a previous session is still running</strong> (PID ${orphan.pid}).<br>
+        Do not start a new job until it finishes. If you are sure it has stalled, kill it below.`;
+      actEl.innerHTML = `<button class="orphan-btn kill" onclick="killOrphan()">Kill process</button>`;
+      btnRun.disabled = true;
+    } else {
+      // unclean exit
+      banner.className = 'orphan-banner unclean';
+      iconEl.textContent = '⚠';
+      msgEl.innerHTML = `<strong>A previous conversion job ended uncleanly.</strong><br>
+        The output may be incomplete — use <em>Verify Last Run</em> to check before using the files.`;
+      actEl.innerHTML = `<button class="orphan-btn" onclick="dismissOrphan()">Dismiss</button>`;
+    }
+    banner.classList.remove('hidden');
+  }
+
+  async function killOrphan() {
+    const btn = document.querySelector('#orphan-actions .orphan-btn.kill');
+    if (btn) { btn.disabled = true; btn.textContent = 'Killing…'; }
+    try {
+      await fetch('/orphan/kill', { method: 'POST' });
+    } catch (e) {}
+    document.getElementById('orphan-banner').classList.add('hidden');
+    btnRun.disabled = false;
+  }
+
+  async function dismissOrphan() {
+    try {
+      await fetch('/orphan/dismiss', { method: 'POST' });
+    } catch (e) {}
+    document.getElementById('orphan-banner').classList.add('hidden');
+  }
+
   (async function init() {
     await loadDockerMappings();
 
@@ -2328,10 +2402,11 @@
       p.style.display = p.style.display === 'none' ? 'block' : 'none';
     }
 
-    // Rejoin a running job or show last-run summary
+    // Rejoin a running job or show last-run summary; also handle orphan state
     try {
       const st   = await fetch('/status');
       const data = await st.json();
+      if (data.orphan) showOrphanBanner(data.orphan);
       if (data.running) {
         setStatus('running', 'Running…');
         btnRun.disabled = true;

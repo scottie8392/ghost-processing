@@ -40,12 +40,49 @@ LAST_JOB_PATH   = os.path.join(BASE_DIR, "last_job.json")
 HISTORY_PATH    = os.path.join(BASE_DIR, "run_history.json")
 VERSION_FILE    = os.path.join(BASE_DIR, "VERSION")
 VERIFY_SCRIPT   = os.path.join(BASE_DIR, "verify_audio.py")
+PID_PATH        = os.path.join(BASE_DIR, "running_job.pid")
 
 # Docker detection — /.dockerenv exists in all Docker containers
 _is_docker = os.path.exists("/.dockerenv")
 
 # Version cache — populated at startup
 _version_cache = {"local": None, "remote": None, "up_to_date": True}
+
+# Orphan state — set at startup if a previous job's PID file is found.
+# {"pid": int, "status": "alive" | "unclean"}  or  None if clean.
+_orphan_state = None
+
+
+def _check_orphan_on_startup():
+    """
+    Called once at startup. If running_job.pid exists:
+    - process alive  → _orphan_state = {"pid": N, "status": "alive"}
+    - process dead   → _orphan_state = {"pid": N, "status": "unclean"}, delete PID file
+    """
+    global _orphan_state
+    if not os.path.exists(PID_PATH):
+        return
+    try:
+        pid = int(open(PID_PATH).read().strip())
+    except Exception:
+        try:
+            os.unlink(PID_PATH)
+        except Exception:
+            pass
+        return
+    try:
+        os.kill(pid, 0)   # signal 0 — just checks existence, doesn't kill
+        _orphan_state = {"pid": pid, "status": "alive"}
+    except (ProcessLookupError, PermissionError):
+        # ProcessLookupError → process gone; PermissionError → exists but owned by another user
+        _orphan_state = {"pid": pid, "status": "unclean"}
+        try:
+            os.unlink(PID_PATH)
+        except Exception:
+            pass
+
+
+_check_orphan_on_startup()
 
 
 def _get_local_sha():
@@ -588,6 +625,9 @@ def run():
         if _is_running:
             return jsonify({"error": "Already processing"}), 409
 
+    if _orphan_state and _orphan_state.get("status") == "alive":
+        return jsonify({"error": f"A conversion job from a previous session is still running (PID {_orphan_state['pid']}). Kill it first via the orphan warning banner."}), 409
+
     _stop_requested = False   # clear any previous stop flag before starting a new job
 
     data = request.json
@@ -691,6 +731,12 @@ def run():
                 # Terminal close on the Mac.
                 start_new_session=True,
             )
+            # Write PID so a server restart can detect this job is still running
+            try:
+                with open(PID_PATH, "w") as pf:
+                    pf.write(str(_active_process.pid))
+            except Exception:
+                pass
             _log_prefix_re = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+ \w+:\s*")
             for line in _active_process.stdout:
                 msg  = line.rstrip()
@@ -816,6 +862,10 @@ def run():
             _log_queue.put(done_entry)
         finally:
             _is_running = False
+            try:
+                os.unlink(PID_PATH)
+            except Exception:
+                pass
             try:
                 os.unlink(tmp.name)
             except Exception:
@@ -987,7 +1037,42 @@ def status():
         "running":      _is_running,
         "current_job":  _current_job,
         "last_job":     last_job,
+        "orphan":       _orphan_state,
     })
+
+
+@app.route("/orphan/kill", methods=["POST"])
+def orphan_kill():
+    """Kill the orphaned process and clear orphan state."""
+    global _orphan_state
+    if not _orphan_state:
+        return jsonify({"ok": True, "message": "No orphan to kill"})
+    pid = _orphan_state.get("pid")
+    killed = False
+    if pid:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            killed = True
+        except (ProcessLookupError, PermissionError):
+            pass  # already gone
+        try:
+            os.unlink(PID_PATH)
+        except Exception:
+            pass
+    _orphan_state = None
+    return jsonify({"ok": True, "killed": killed})
+
+
+@app.route("/orphan/dismiss", methods=["POST"])
+def orphan_dismiss():
+    """Clear orphan state without killing (for unclean-exit case)."""
+    global _orphan_state
+    _orphan_state = None
+    try:
+        os.unlink(PID_PATH)
+    except Exception:
+        pass
+    return jsonify({"ok": True})
 
 
 @app.route("/history", methods=["GET"])
