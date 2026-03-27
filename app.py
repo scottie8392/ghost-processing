@@ -178,6 +178,8 @@ DEFAULT_PROFILE = {
     "saved_sources": [],
     # Notifications
     "slack_webhook_url": "",
+    # Quality
+    "auto_verify": False,
 }
 
 # Runtime state
@@ -860,6 +862,41 @@ def run():
                     )
                 except Exception:
                     pass
+
+            # Auto-verify output file integrity after job completes
+            if config.get("auto_verify") and not config.get("dry_run") and rc == 0:
+                verify_config = {
+                    "source_dir":         config.get("source_dir", ""),
+                    "dest_base":          config.get("dest_base", ""),
+                    "target_sample_rate": config.get("target_sample_rate", 48000),
+                    "bit_depth":          config.get("bit_depth", 24),
+                }
+                try:
+                    import tempfile as _tf
+                    vt = _tf.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
+                    yaml.dump(verify_config, vt)
+                    vt.close()
+                    python = os.path.join(BASE_DIR, "ghost-processing-venv", "bin", "python")
+                    if not os.path.exists(python):
+                        python = "python3"
+                    _log_queue.put({"type": "log", "message": "— Output integrity check —"})
+                    v_proc = subprocess.Popen(
+                        [python, "-u", VERIFY_SCRIPT, "--config", vt.name, "--stream"],
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, bufsize=1,
+                    )
+                    for vline in v_proc.stdout:
+                        entry = {"type": "log", "message": vline.rstrip()}
+                        _log_ring.append(entry)
+                        _log_queue.put(entry)
+                    v_proc.wait()
+                except Exception as ve:
+                    _log_queue.put({"type": "log", "message": f"Verification error: {ve}"})
+                finally:
+                    try:
+                        os.unlink(vt.name)
+                    except Exception:
+                        pass
 
             # Slack webhook notification (all platforms, including Docker)
             slack_url = (data.get("slack_webhook_url") or "").strip()

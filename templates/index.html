@@ -990,9 +990,15 @@
             <div class="hint">Shows every file processed including skips. Useful when a run produces unexpected results and you need to see exactly what happened to each file.</div>
           </div>
           <div class="field" style="margin-top:10px;">
-            <label class="field-label">Deep Verification</label>
-            <div class="hint" style="margin-bottom:8px;">MD5-checks every converted file against the source to catch corrupted or truncated output. Reads all dest files — takes a few seconds on a local drive, longer on NAS.</div>
-            <button class="btn-reset" id="btn-verify" onclick="verifyLastRun()" style="margin-top:0">Verify Last Run</button>
+            <label class="field-label">Output File Integrity</label>
+            <div class="hint" style="margin-bottom:8px;">MD5-checks every output file against its recorded hash to catch corrupted or truncated writes. Recommended for NAS and network drives.</div>
+            <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+              <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-dim); cursor:pointer;">
+                <input type="checkbox" id="auto_verify" style="margin:0;">
+                Check automatically after every run
+              </label>
+              <button class="btn-reset" id="btn-verify" onclick="verifyLastRun()" style="margin-top:0">Verify Last Run</button>
+            </div>
             <div id="verify-result" style="display:none; margin-top:10px;"></div>
           </div>
         </div>
@@ -1184,6 +1190,7 @@
     stability_wait_sec: 60,
     log_dir:            '',
     slack_webhook_url:  '',
+    auto_verify:        false,
   };
 
   function toggleUnpairedOption() {
@@ -1300,6 +1307,7 @@
     setVal('stability_wait_sec', p.stability_wait_sec != null ? p.stability_wait_sec : DEFAULTS.stability_wait_sec);
     setVal('log_dir',            p.log_dir            || DEFAULTS.log_dir);
     setVal('slack_webhook_url',  p.slack_webhook_url  || '');
+    setChk('auto_verify',        p.auto_verify);
     toggleWatchFields();
   }
 
@@ -1327,6 +1335,7 @@
       stability_wait_sec: parseInt(document.getElementById('stability_wait_sec').value) || 60,
       log_dir:            document.getElementById('log_dir').value.trim(),
       slack_webhook_url:  document.getElementById('slack_webhook_url').value.trim(),
+      auto_verify:        document.getElementById('auto_verify').checked,
     };
   }
 
@@ -2378,6 +2387,7 @@
       setVal('stability_wait_sec', p.stability_wait_sec != null ? p.stability_wait_sec : 60);
       setVal('log_dir',            p.log_dir            || '');
       setVal('slack_webhook_url',  p.slack_webhook_url  || '');
+      setChk('auto_verify',        p.auto_verify);
       setSel('run_mode', p.run_mode || 'nas');
 
       // NAS connection history datalist

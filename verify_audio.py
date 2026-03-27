@@ -1,8 +1,8 @@
 """
 Ghost Processing — verification script
 
-Audits processed output to confirm all source files are accounted for.
-Checks for unprocessed files, missing destination files, and hash mismatches.
+Audits processed output to confirm all source files are accounted for
+and that every dest file's MD5 hash matches what was recorded at write time.
 
 Usage:
     python verify_audio.py --config config.local.yaml
@@ -32,7 +32,7 @@ def collect_files(directory):
     files = []
     for root, _, filenames in os.walk(directory):
         for filename in filenames:
-            if filename.startswith("."):  # Skip macOS resource forks and hidden files
+            if filename.startswith("."):
                 continue
             file_path = os.path.join(root, filename)
             if is_audio_file(file_path):
@@ -45,15 +45,13 @@ def load_config(config_path):
         return yaml.safe_load(f)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Ghost Processing — verification")
-    parser.add_argument("--config", required=True, help="Path to YAML config file")
-    parser.add_argument("--json", action="store_true", help="Output machine-readable JSON summary")
-    args = parser.parse_args()
-
-    config = load_config(args.config)
-    source_dir = config["source_dir"]
-    dest_base = config["dest_base"]
+def run_verification(config, stream=False):
+    """
+    Core verification logic. Returns a result dict.
+    If stream=True, prints per-file progress lines as it runs.
+    """
+    source_dir  = config["source_dir"]
+    dest_base   = config["dest_base"]
     source_name = os.path.basename(os.path.normpath(source_dir))
     target_rate = config.get("target_sample_rate", 48000)
     bit_depth   = config.get("bit_depth", 24)
@@ -62,18 +60,18 @@ def main():
     suffix      = f"{target_rate // 1000}k{depth_part}"
     dest_dir    = os.path.join(dest_base, f"{source_name}_{suffix}")
     progress_log = os.path.join(dest_dir, "progress.json")
-    rejects_log = os.path.join(dest_dir, "rejects.json")
+    rejects_log  = os.path.join(dest_dir, "rejects.json")
 
     source_files = set(collect_files(source_dir))
 
-    # Load logs
     progress = {}
     if os.path.exists(progress_log):
         with open(progress_log) as f:
             try:
                 progress = json.load(f)
             except json.JSONDecodeError:
-                print("WARNING: progress.json is corrupted")
+                if stream:
+                    print("WARNING: progress.json is corrupted", flush=True)
 
     rejects = []
     if os.path.exists(rejects_log):
@@ -81,86 +79,113 @@ def main():
             try:
                 rejects = [e["path"] for e in json.load(f) if isinstance(e, dict) and "path" in e]
             except json.JSONDecodeError:
-                print("WARNING: rejects.json is corrupted")
+                if stream:
+                    print("WARNING: rejects.json is corrupted", flush=True)
 
-    all_progress = {os.path.join(source_dir, rel): data for rel, data in progress.items()}
+    all_progress     = {os.path.join(source_dir, rel): data for rel, data in progress.items()}
     rejected_sources = set(rejects)
-    # Split progress entries by status so verifier can report them accurately
     converted_sources = {p: d for p, d in all_progress.items() if d.get("status") in ("converted", "copied")}
     merged_sources    = {p: d for p, d in all_progress.items() if d.get("status") == "merged"}
     unpaired_sources  = {p: d for p, d in all_progress.items() if d.get("status") == "unpaired"}
-    processed = set(all_progress) | rejected_sources
-    unprocessed = source_files - processed
+    processed         = set(all_progress) | rejected_sources
+    unprocessed       = source_files - processed
 
-    # Check destination files and hashes
-    # Cache hashes to avoid re-reading the same source file twice
-    hash_cache = {}
-    missing_dest = []
-    hash_mismatches = []
+    missing_dest     = []
+    hash_mismatches  = []
+    passed           = []
 
-    for source_path, data in converted_sources.items():
-        rel = os.path.relpath(source_path, source_dir)
+    total = len(converted_sources)
+    if stream and total > 0:
+        print(f"Verifying {total} output file{'s' if total != 1 else ''}...", flush=True)
+
+    for i, (source_path, data) in enumerate(sorted(converted_sources.items()), 1):
+        rel      = os.path.relpath(source_path, source_dir)
         base, ext = os.path.splitext(rel)
         dest_ext  = ".wav" if (is_float and ext.lower() in (".aif", ".aiff")) else ext
         dest_path = os.path.join(dest_dir, f"{base}_{suffix}{dest_ext}")
+
         if not os.path.exists(dest_path):
             missing_dest.append(source_path)
-        else:
-            if source_path not in hash_cache:
-                hash_cache[source_path] = file_hash(source_path)
-            if hash_cache[source_path] != data.get("source_hash"):
+            if stream:
+                print(f"Verify: {rel}  ✗ MISSING", flush=True)
+            continue
+
+        stored_dest_hash = data.get("dest_hash")
+        if stored_dest_hash:
+            # New format: compare dest file against its recorded hash
+            actual = file_hash(dest_path)
+            if actual != stored_dest_hash:
                 hash_mismatches.append(source_path)
+                if stream:
+                    print(f"Verify: {rel}  ✗ HASH MISMATCH (file may be corrupted)", flush=True)
+            else:
+                passed.append(source_path)
+                if stream:
+                    print(f"Verify: {rel}  ✓", flush=True)
+        else:
+            # Legacy format (no dest_hash stored): just confirm dest exists
+            passed.append(source_path)
+            if stream:
+                print(f"Verify: {rel}  ✓ (no hash on record — re-run job to enable full check)", flush=True)
+
+    return {
+        "source_files":        len(source_files),
+        "converted":           len(converted_sources),
+        "merged":              len(merged_sources),
+        "unpaired":            len(unpaired_sources),
+        "rejected":            len(rejected_sources),
+        "unprocessed":         len(unprocessed),
+        "missing_dest":        len(missing_dest),
+        "hash_mismatches":     len(hash_mismatches),
+        "passed":              len(passed),
+        "unprocessed_files":   sorted(unprocessed),
+        "missing_dest_files":  sorted(missing_dest),
+        "hash_mismatch_files": sorted(hash_mismatches),
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Ghost Processing — verification")
+    parser.add_argument("--config",  required=True, help="Path to YAML config file")
+    parser.add_argument("--json",    action="store_true", help="Output machine-readable JSON summary")
+    parser.add_argument("--stream",  action="store_true", help="Stream per-file progress lines (for UI log panel)")
+    args = parser.parse_args()
+
+    config = load_config(args.config)
+    result = run_verification(config, stream=(args.stream or not args.json))
 
     if args.json:
-        summary = {
-            "source_files":       len(source_files),
-            "converted":          len(converted_sources),
-            "merged":             len(merged_sources),
-            "unpaired":           len(unpaired_sources),
-            "rejected":           len(rejected_sources),
-            "unprocessed":        len(unprocessed),
-            "missing_dest":       len(missing_dest),
-            "hash_mismatches":    len(hash_mismatches),
-            "unprocessed_files":  sorted(unprocessed),
-            "missing_dest_files": sorted(missing_dest),
-            "hash_mismatch_files": sorted(hash_mismatches),
-        }
-        print(json.dumps(summary, indent=2))
+        print(json.dumps(result, indent=2), flush=True)
         return
 
-    print(f"Source files found: {len(source_files)}")
+    # Human-readable summary (always printed in non-JSON mode)
+    total   = result["converted"]
+    passed  = result["passed"]
+    issues  = result["missing_dest"] + result["hash_mismatches"]
+    all_ok  = result["unprocessed"] == 0 and result["missing_dest"] == 0 and result["hash_mismatches"] == 0
 
-    if unprocessed:
-        print(f"\nWARNING: {len(unprocessed)} unprocessed files (not accounted for):")
-        for f in sorted(unprocessed):
-            print(f"  - {f}")
+    print("", flush=True)
+    if all_ok:
+        print(f"Verification passed — {passed}/{total} files OK", flush=True)
     else:
-        print("\nAll source files accounted for.")
+        print(f"Verification found issues — {passed}/{total} files OK", flush=True)
 
-    if missing_dest:
-        print(f"\nERROR: {len(missing_dest)} missing destination files:")
-        for f in sorted(missing_dest):
-            print(f"  - {f}")
-    else:
-        print("All converted files have matching destinations.")
-
-    if hash_mismatches:
-        print(f"\nWARNING: {len(hash_mismatches)} hash mismatches (source changed since conversion?):")
-        for f in sorted(hash_mismatches):
-            print(f"  - {f}")
-    else:
-        print("All hashes match.")
-
-    print(f"\nSummary:")
-    print(f"  Converted:       {len(converted_sources)}")
-    if merged_sources:
-        print(f"  Merged (L/R):    {len(merged_sources)} source files")
-    if unpaired_sources:
-        print(f"  Unpaired (L/R):  {len(unpaired_sources)} blocked (no matching partner)")
-    print(f"  Rejected:        {len(rejected_sources)}")
-    print(f"  Unprocessed:     {len(unprocessed)}")
-    print(f"  Missing dest:    {len(missing_dest)}")
-    print(f"  Hash mismatches: {len(hash_mismatches)}")
+    if result["unprocessed"]:
+        print(f"  {result['unprocessed']} unprocessed source files", flush=True)
+        for f in result["unprocessed_files"]:
+            print(f"    - {f}", flush=True)
+    if result["missing_dest"]:
+        print(f"  {result['missing_dest']} missing dest files", flush=True)
+        for f in result["missing_dest_files"]:
+            print(f"    - {f}", flush=True)
+    if result["hash_mismatches"]:
+        print(f"  {result['hash_mismatches']} hash mismatches (corrupted output)", flush=True)
+        for f in result["hash_mismatch_files"]:
+            print(f"    - {f}", flush=True)
+    if result["merged"]:
+        print(f"  {result['merged']} merged L/R pairs", flush=True)
+    if result["unpaired"]:
+        print(f"  {result['unpaired']} unpaired L/R (blocked)", flush=True)
 
 
 if __name__ == "__main__":
