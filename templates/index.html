@@ -1153,7 +1153,11 @@
   function _resetActivityTimer() {
     if (_activityTimer) clearTimeout(_activityTimer);
     _activityTimer = setTimeout(() => {
-      addLine('⚠  No activity for 60 seconds — job may be frozen or stalled on a large file.', 'warn');
+      const atEnd = totalFiles > 0 && liveDoneCount >= totalFiles;
+      const msg = atEnd
+        ? '⚠  All files processed but no completion signal received — the job likely ended uncleanly. Restart the app and use Verify Last Run to confirm your files.'
+        : '⚠  No activity for 60 seconds — job may be frozen or stalled on a large file.';
+      addLine(msg, 'error');
     }, 60000);
   }
 
