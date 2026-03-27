@@ -517,10 +517,11 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                     logging.info(f"[DRY RUN] Would copy: {rel_path}  ({src_fmt}, no conversion needed,{level_str})")
                     return "copied"
                 shutil.copy2(file_path, dest_path)
-                src_hash = file_hash(file_path)
+                src_hash  = file_hash(file_path)
+                dest_hash = file_hash(dest_path)
                 append_log(
                     progress_log,
-                    {rel_path: {"status": "copied", "source_hash": src_hash, "timestamp": str(datetime.now())}},
+                    {rel_path: {"status": "copied", "source_hash": src_hash, "dest_hash": dest_hash, "timestamp": str(datetime.now())}},
                     is_list=False,
                 )
                 elapsed = f"  {time.time() - t0:.1f}s" if verbose else ""
@@ -531,10 +532,11 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                               verbose=verbose):
                 if not config["dry_run"]:
                     copy_bwf_metadata(file_path, dest_path)
-                    src_hash = file_hash(file_path)
+                    src_hash  = file_hash(file_path)
+                    dest_hash = file_hash(dest_path)
                     append_log(
                         progress_log,
-                        {rel_path: {"status": "converted", "source_hash": src_hash, "timestamp": str(datetime.now())}},
+                        {rel_path: {"status": "converted", "source_hash": src_hash, "dest_hash": dest_hash, "timestamp": str(datetime.now())}},
                         is_list=False,
                     )
                 elapsed = f"  {time.time() - t0:.1f}s" if verbose else ""
