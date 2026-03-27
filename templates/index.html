@@ -2268,7 +2268,7 @@
   // ---------------------------------------------------------------------------
   // Orphan process warning
   // ---------------------------------------------------------------------------
-  function showOrphanBanner(orphan) {
+  function showOrphanBanner(orphan, lastJob) {
     const banner  = document.getElementById('orphan-banner');
     const iconEl  = document.getElementById('orphan-icon');
     const msgEl   = document.getElementById('orphan-msg');
@@ -2287,8 +2287,14 @@
       banner.className = 'orphan-banner unclean';
       iconEl.textContent = '⚠';
       msgEl.innerHTML = `<strong>A previous conversion job ended uncleanly.</strong><br>
-        The output may be incomplete — use <em>Verify Last Run</em> to check before using the files.`;
-      actEl.innerHTML = `<button class="orphan-btn" onclick="dismissOrphan()">Dismiss</button>`;
+        The output may be incomplete. Resume the job to finish — already-converted files will be skipped.`;
+      let resumeBtn = '';
+      if (lastJob && lastJob.source_dir) {
+        resumeBtn = `<button class="orphan-btn" onclick="resumeOrphanJob()">Resume Job</button>`;
+      }
+      actEl.innerHTML = resumeBtn + `<button class="orphan-btn" onclick="dismissOrphan()">Dismiss</button>`;
+      // Store last job on the banner element so resumeOrphanJob() can access it
+      banner._lastJob = lastJob;
     }
     banner.classList.remove('hidden');
   }
@@ -2308,6 +2314,21 @@
       await fetch('/orphan/dismiss', { method: 'POST' });
     } catch (e) {}
     document.getElementById('orphan-banner').classList.add('hidden');
+  }
+
+  async function resumeOrphanJob() {
+    const banner  = document.getElementById('orphan-banner');
+    const lastJob = banner._lastJob;
+    if (!lastJob) return;
+    // Pre-fill form fields from last job so the run picks up where it left off
+    if (lastJob.source_dir)         setVal('source_dir', lastJob.source_dir);
+    if (lastJob.dest_base)          setVal('dest_base',  lastJob.dest_base);
+    if (lastJob.target_sample_rate) setSel('target_sample_rate', lastJob.target_sample_rate);
+    if (lastJob.bit_depth != null)  setSel('bit_depth', lastJob.bit_depth);
+    // Dismiss the banner and start
+    try { await fetch('/orphan/dismiss', { method: 'POST' }); } catch (e) {}
+    banner.classList.add('hidden');
+    startRun();
   }
 
   (async function init() {
@@ -2410,7 +2431,7 @@
     try {
       const st   = await fetch('/status');
       const data = await st.json();
-      if (data.orphan) showOrphanBanner(data.orphan);
+      if (data.orphan) showOrphanBanner(data.orphan, data.last_job);
       if (data.running) {
         setStatus('running', 'Running…');
         btnRun.disabled = true;
