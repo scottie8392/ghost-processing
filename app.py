@@ -865,6 +865,7 @@ def run():
                     pass
 
             # Auto-verify output file integrity after job completes
+            _log_queue.put({"type": "log", "message": f"[debug] auto_verify={config.get('auto_verify')} dry_run={config.get('dry_run')} rc={rc}"})
             if config.get("auto_verify") and not config.get("dry_run") and rc == 0:
                 verify_config = {
                     "source_dir":         config.get("source_dir", ""),
