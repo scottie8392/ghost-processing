@@ -183,9 +183,9 @@ def main():
         for f in result["hash_mismatch_files"]:
             print(f"    - {f}", flush=True)
     if result["merged"]:
-        print(f"  {result['merged']} merged L/R pairs", flush=True)
+        print(f"  {result['merged']} merged L/R source files ({result['merged'] // 2} pair{'s' if result['merged'] // 2 != 1 else ''})", flush=True)
     if result["unpaired"]:
-        print(f"  {result['unpaired']} unpaired L/R (blocked)", flush=True)
+        print(f"  {result['unpaired']} unpaired L/R source file{'s' if result['unpaired'] != 1 else ''} (blocked)", flush=True)
 
 
 if __name__ == "__main__":
