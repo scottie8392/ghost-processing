@@ -18,7 +18,7 @@ A personal audio processing pipeline for a music studio. Converts stems (WAV/AIF
 
 ---
 
-## Current State (as of 2026-03-26, Sprint 1.1 + 1.2 + Sprint 2 + Sprint 4 + Sprint 5 + Sprint 6 complete)
+## Current State (as of 2026-03-27, Sprint 1.1 + 1.2 + Sprint 2 + Sprint 4 + Sprint 5 + Sprint 6 + Sprint 7a/7b complete)
 
 The app is **feature-complete and working**. Core pipeline verified by real test runs. All known code bugs fixed. Remote configured at `origin/main`.
 
@@ -76,6 +76,15 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - NAS mode dest path: local absolute paths (e.g. /Users/scottie/Desktop) used as-is; not mangled through NAS share detection
 - SMB share name vs mount point: uses nasShareRoot (actual share name) not the local folder name which macOS may suffix with -1/-2
 
+### Verified by Sprint 7a + 7b:
+- Pre-flight check — `/preflight` endpoint validates SoX installed, source readable, dest parent writable before spawning any subprocess; `startRun()` calls it first, shows specific errors in log panel on failure
+- Orphaned process detection — `running_job.pid` written after Popen, deleted in finally; `_check_orphan_on_startup()` detects alive vs unclean on server restart; `/status` includes orphan state; `/run` blocked if orphan alive
+- Orphan banner — amber for alive (Kill Process button, Run disabled), gray for unclean (Resume Job + Dismiss buttons)
+- Orphan kill uses `os.killpg` — kills main process AND all ProcessPoolExecutor workers; SIGTERM + SIGKILL after 3s
+- Unclean startup auto-cleanup — `SIGKILL` sent to the process group at startup if main process is already dead (cleans up lingering workers before browser loads)
+- Resume Job button — pre-fills form from `last_job.json` and starts run; resume logic in `process_audio.py` skips already-converted files via `progress.json`
+- Watchdog message context-aware — at 100% progress with no done event, shows actionable error ("restart + Verify Last Run") instead of generic "may be frozen"
+
 ### Verified by Sprint 6:
 - Frozen job watchdog — 60s inactivity warning line in log if no SSE events; clears on done/stop
 - Realistic ETA — phase bar shows "Processing · ETA Xm Ys" once rate is established; hides when done
@@ -117,8 +126,13 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 
 ## Immediate Next Steps
 
-### Sprint 7 — see BACKLOG.md for candidates
-All 🔴 bugs fixed. Sprint 6 (observability) complete.
+### Sprint 7 continued — see BACKLOG.md
+Sprint 7a (pre-flight) and 7b (orphaned process detection) complete.
+
+**Next sprints in priority order:**
+1. **Sprint 7c** — Dest file integrity check on resume: store `dest_hash` in `progress.json` at write time; verify on resume — catches corruption/truncation AFTER a successful run (NAS write failure). Current logic already re-converts mid-run truncations (progress.json not written on failure).
+2. **Sprint 7d** — Webhook notification: optional URL field in settings; POST JSON on completion — for unattended overnight Docker/NAS runs.
+3. **Sprint 7e** — Watch mode with Pro Tools safety: replace fixed `stability_wait_sec` delay with file-size-stability polling (no growth for N seconds) — required before watch mode can be used safely with Pro Tools bounces.
 
 ---
 
