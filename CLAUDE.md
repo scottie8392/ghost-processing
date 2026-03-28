@@ -18,7 +18,7 @@ A personal audio processing pipeline for a music studio. Converts stems (WAV/AIF
 
 ---
 
-## Current State (as of 2026-03-27, Sprint 1.1 + 1.2 + Sprint 2 + Sprint 4 + Sprint 5 + Sprint 6 + Sprint 7a/7b complete)
+## Current State (as of 2026-03-28, Sprint 1.1 + 1.2 + Sprint 2 + Sprint 4 + Sprint 5 + Sprint 6 + Sprint 7a/7b/7c + Sprint 8 complete)
 
 The app is **feature-complete and working**. Core pipeline verified by real test runs. All known code bugs fixed. Remote configured at `origin/main`.
 
@@ -50,7 +50,7 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - `profile.json` settings persistence across sessions
 - Atomic JSON writes (tempfile + fsync + rename) for `progress.json`
 - Per-run timestamped log files in `logs/` AND copied into dest folder alongside `progress.json` and `rejects.json`
-- Auto-verification after batch completes
+- Auto-verification after batch completes; per-file inline `Verified: ✓` logged immediately after each copy/convert/merge
 - `/browse` endpoint blocks sensitive system directories (path traversal protection)
 - Output naming: `{source_name}_{rate}k{depth}b/` e.g. `Boston_48k24b/`, files named `stem_48k24b.wav` (underscore separator, no dash in suffix)
 
@@ -84,6 +84,19 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 - Unclean startup auto-cleanup — `SIGKILL` sent to the process group at startup if main process is already dead (cleans up lingering workers before browser loads)
 - Resume Job button — pre-fills form from `last_job.json` and starts run; resume logic in `process_audio.py` skips already-converted files via `progress.json`
 - Watchdog message context-aware — at 100% progress with no done event, shows actionable error ("restart + Verify Last Run") instead of generic "may be frozen"
+
+### Verified by Sprint 8 (watch mode polish + UI reorganization):
+- Watch mode: all settings lock immediately on Run start, unlock on Stop — no page refresh needed
+- Watch mode: per-file inline `Verified: ✓` logged after each file processed (copy/convert/merge)
+- Watch mode: periodic 15-second L/R partner-wait warnings in log for unmatched files still waiting
+- Watch mode: stopped banner shows chill red (◼ Stopped) with no stats — File Review is the live tally
+- Watch mode: File Review badges (converted, copied, merged, rejected, skipped, unpaired) update in real-time as files are processed; all badges hidden when count is zero
+- Watch mode: SSE stream stays open after Stop so auto-verify lines arrive before `done` event closes it
+- L/R pairs already at target rate/depth: log `Copied:` + `Merged:` instead of `Converted:` + `Merged:` (fix: `bit_depth` from config is string "24", `get_bit_depth()` returns int 24 — cast before compare)
+- UI: Watch Mode toggle moved to main form alongside Dry Run / Force WAV / Combine L/R
+- UI: Workers and Stability Wait (sec) moved to Advanced section
+- UI: Run History card collapsed by default; toggle arrow larger and full-color
+- File Review: copied badge styled green to match converted badge
 
 ### Verified by Sprint 6:
 - Frozen job watchdog — 60s inactivity warning line in log if no SSE events; clears on done/stop
@@ -126,13 +139,13 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 
 ## Immediate Next Steps
 
-### Sprint 7 continued — see BACKLOG.md
-Sprint 7a (pre-flight) and 7b (orphaned process detection) complete.
+### Sprint 8 complete — see BACKLOG.md for full backlog
 
-**Next sprints in priority order:**
-1. **Sprint 7c** — Dest file integrity check on resume: store `dest_hash` in `progress.json` at write time; verify on resume — catches corruption/truncation AFTER a successful run (NAS write failure). Current logic already re-converts mid-run truncations (progress.json not written on failure).
-2. **Sprint 7d** — Webhook notification: optional URL field in settings; POST JSON on completion — for unattended overnight Docker/NAS runs.
-3. **Sprint 7e** — Watch mode with Pro Tools safety: replace fixed `stability_wait_sec` delay with file-size-stability polling (no growth for N seconds) — required before watch mode can be used safely with Pro Tools bounces.
+**Next priorities (to be planned):**
+1. **Watch mode Pro Tools safety (Sprint 7e)** — replace fixed `stability_wait_sec` delay with file-size-stability polling (no growth for N seconds). Required before watch mode is safe with Pro Tools bounces that write files incrementally.
+2. **Webhook notification (Sprint 7d)** — Slack Webhook URL field exists in UI but backend POST is not yet wired. Add `_send_webhook()` call in `run_process()` on completion; POST JSON payload with job name, counts, status.
+3. **Watch mode end-to-end testing** — validate in Docker on DS1821+; validate Pro Tools bounce race condition with real session.
+4. **Reconnect banner** — prominent job result on page load when last job exists and nothing is running (current last-run chip is easy to miss).
 
 ---
 
@@ -291,4 +304,4 @@ python verify_audio.py --config config.local.yaml
 
 - Branch: `main`
 - Remote: `origin/main` — `https://github.com/scottie8392/ghost-processing`
-- Working tree: clean as of 2026-03-25 Sprint 5 completion
+- Working tree: clean as of 2026-03-28 Sprint 8 completion
