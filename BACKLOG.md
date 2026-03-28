@@ -79,6 +79,7 @@ docker-compose up -d
 ## 🟢 Backlog — Features & Improvements
 
 ### Stability
+- [ ] **Test suite** — no automated tests exist. Minimum viable suite: (1) unit tests for `process_audio.py` core functions (`check_silence`, `output_suffix`, `find_lr_source_pairs`, `merge_lr_pairs` logic); (2) integration test that runs a batch against a fixture folder of known files and asserts correct counts (converted/copied/rejected/skipped). Use `pytest`. Run as part of pre-commit or CI. Start narrow — test the logic that has burned us before (silence detection metric, bit_depth string/int cast, already_right comparison).
 - [x] **Pre-flight check before run (Sprint 7a)** — `/preflight` POST endpoint checks SoX installed, source readable, dest parent writable before job starts. `startRun()` calls it first; specific failures shown in log panel; on pass proceeds silently to `/run`.
 - [ ] **Realistic progress bar** — true percentage (files done / total), elapsed time, and ETA. Currently the log scrolls but there's no summary-level progress indicator.
 - [ ] **Health check page** — `/health` endpoint showing SoX version, FFmpeg version, Python version, active NFS mounts, disk space on source and dest. Useful for diagnosing issues without opening Terminal.
