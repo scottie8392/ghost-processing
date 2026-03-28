@@ -125,7 +125,8 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 
 ### Not yet tested:
 - NFS/SMB network drop mid-run
-- Watch mode
+- Watch mode end-to-end in Docker on DS1821+
+- Watch mode Pro Tools bounce race condition (file-size stability not yet implemented)
 
 ### Verified by Sprint 2:
 - Docker end-to-end — DS1821+ (AMD Ryzen V1500B, 4GB RAM), 3 workers, real session folder, 48kHz/24-bit. Verification passed — all files accounted for.
@@ -141,11 +142,17 @@ The app is **feature-complete and working**. Core pipeline verified by real test
 
 ### Sprint 8 complete — see BACKLOG.md for full backlog
 
-**Next priorities (to be planned):**
-1. **Watch mode Pro Tools safety (Sprint 7e)** — replace fixed `stability_wait_sec` delay with file-size-stability polling (no growth for N seconds). Required before watch mode is safe with Pro Tools bounces that write files incrementally.
-2. **Webhook notification (Sprint 7d)** — Slack Webhook URL field exists in UI but backend POST is not yet wired. Add `_send_webhook()` call in `run_process()` on completion; POST JSON payload with job name, counts, status.
-3. **Watch mode end-to-end testing** — validate in Docker on DS1821+; validate Pro Tools bounce race condition with real session.
-4. **Reconnect banner** — prominent job result on page load when last job exists and nothing is running (current last-run chip is easy to miss).
+**Next priorities (agreed order):**
+1. **Watch mode Pro Tools safety (Sprint 7e)** — replace fixed `stability_wait_sec` delay with file-size-stability polling (no growth for N seconds). Required before watch mode can be trusted with Pro Tools bounces that write files incrementally.
+2. **NAS IP nicknames** — assign friendly names to NAS IPs (e.g. "192.168.1.20" → "Synology"); shown in IP history dropdown and connection status bar.
+3. **Source folder file preview** — collapsible file tree once a valid source path is entered; shows audio files found, count per subfolder, total count. Confirm you're pointed at the right session before running.
+4. **Session queue** — queue multiple source folders to run sequentially; reorder/remove controls in a queue panel. Essential for unattended overnight batches across many sessions.
+5. **Silence threshold calibration tool** — feed reference files; app measures levels and suggests threshold + min-length settings; previews which files in source would be rejected at that setting.
+6. **Pre-run summary modal** — confirmation dialog before job starts: "Found N files — Y already converted (skip), Z to convert. Proceed?" Requires source preview scan data (item 3) to be useful.
+
+**Lower priority / backlogged:**
+- Webhook notification (Sprint 7d) — Slack URL field in UI, backend POST not yet wired
+- Multi-node processing farm — pool local or Tailscale machines; master assigns files to headless workers
 
 ---
 
