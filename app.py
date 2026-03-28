@@ -770,6 +770,8 @@ def run():
                     converted += 1
                 elif ml.startswith("copied:") or ml.startswith("[dry run] would copy:"):
                     copied += 1
+                elif ml.startswith("merged:") or ml.startswith("[dry run] would merge:"):
+                    merged += 1
                 elif ml.startswith("rejected:"):
                     rejected += 1
                 elif ml.startswith("skipping:") or ml.startswith("already processed"):
@@ -802,8 +804,9 @@ def run():
             else:
                 job_status = "error"
 
-            # Auto-verify output file integrity — runs before done so results appear in log panel
-            if config.get("auto_verify") and not config.get("dry_run") and rc == 0:
+            # Auto-verify output file integrity — runs before done so results appear in log panel.
+            # Runs on clean completion (rc == 0) or user-stopped (watch mode always stops this way).
+            if config.get("auto_verify") and not config.get("dry_run") and job_status == "done":
                 verify_config = {
                     "source_dir":         config.get("source_dir", ""),
                     "dest_base":          config.get("dest_base", ""),
@@ -818,7 +821,7 @@ def run():
                     python = os.path.join(BASE_DIR, "ghost-processing-venv", "bin", "python")
                     if not os.path.exists(python):
                         python = "python3"
-                    _log_queue.put({"type": "log", "message": "— Output integrity check —"})
+                    _log_queue.put({"type": "log", "message": "— Checking all source files accounted for —"})
                     v_proc = subprocess.Popen(
                         [python, "-u", VERIFY_SCRIPT, "--config", vt.name, "--stream"],
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

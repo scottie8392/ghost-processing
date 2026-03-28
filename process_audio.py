@@ -23,6 +23,7 @@ import argparse
 import struct
 import tempfile
 import subprocess
+import threading
 from datetime import datetime
 from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError
 
@@ -530,6 +531,8 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                 )
                 elapsed = f"  {time.time() - t0:.1f}s" if verbose else ""
                 logging.info(f"Copied: {rel_path}  ({src_fmt}, no conversion needed,{level_str}{elapsed})")
+                if config.get("auto_verify"):
+                    logging.info(f"Verified: {rel_path}  \u2713")
                 return "copied"
 
             if resample_audio(file_path, dest_path, target_rate, bit_depth, config["dry_run"],
@@ -548,6 +551,8 @@ def process_file(file_path, config, rejects_log, progress_log, dest_dir):
                     logging.info(f"[DRY RUN] Would convert: {rel_path}  ({src_fmt} → {dest_fmt},{level_str})")
                 else:
                     logging.info(f"Converted: {rel_path}  ({src_fmt} → {dest_fmt},{level_str}{elapsed})")
+                    if config.get("auto_verify"):
+                        logging.info(f"Verified: {rel_path}  \u2713")
                 return file_path
             return None
 
@@ -690,11 +695,11 @@ def find_lr_source_pairs(source_dir):
             if not is_audio_file(fname):
                 continue
             name, ext = os.path.splitext(fname)
-            if name.endswith(" L"):
+            if name.endswith(" L") or name.endswith(".L"):
                 stem = name[:-2]
                 key = (root, stem, ext.lower())
                 left_files[key] = os.path.join(root, fname)
-            elif name.endswith(" R"):
+            elif name.endswith(" R") or name.endswith(".R"):
                 stem = name[:-2]
                 key = (root, stem, ext.lower())
                 right_files[key] = os.path.join(root, fname)
@@ -771,10 +776,47 @@ def merge_lr_pairs(source_pairs, dest_dir, config, unpaired=None):
             merged_sources.append((left_src, right_src))
             continue
 
+        # Silence detection: reject only if BOTH channels are silent.
+        # A stem that is silent on one side (e.g. dry kick only on L) must be kept.
+        logging.info(f"Checking: {display_name}  ({src_fmt_str}, L+R)")
+        silence_thresh     = config.get("silence_thresh", -50.0)
+        min_silence_len    = config.get("min_silence_len", 200)
+        min_non_silent_len = config.get("min_non_silent_len", 10)
+        left_silent,  left_level,  _ = check_silence(left_src,  silence_thresh, min_silence_len, min_non_silent_len)
+        right_silent, right_level, _ = check_silence(right_src, silence_thresh, min_silence_len, min_non_silent_len)
+
+        # Level display: loudest of the two channels
+        levels = [l for l in (left_level, right_level) if l is not None]
+        if levels:
+            peak = max(levels)
+            level_str = "  level -\u221edBFS" if peak == float("-inf") else f"  level {peak:.1f}dBFS"
+        else:
+            level_str = ""
+
+        if left_silent and right_silent:
+            logging.info(f"Rejected: {display_name}  ({src_fmt_str}, silent{level_str})")
+            if not dry_run and dest_dir:
+                rejects_log_path = os.path.join(dest_dir, "rejects.json")
+                rel_l = os.path.relpath(left_src, source_dir) if source_dir else os.path.basename(left_src)
+                rel_r = os.path.relpath(right_src, source_dir) if source_dir else os.path.basename(right_src)
+                append_log(rejects_log_path, [
+                    {"path": rel_l, "reason": "silent (L/R pair)"},
+                    {"path": rel_r, "reason": "silent (L/R pair)"},
+                ])
+            continue
+
+        target_bits_int = 32 if is_float else int(bit_depth)
+        already_right = (src_rate == target_rate and src_bits == target_bits_int)
+        copy_info = f"  ({src_fmt_str}, no conversion needed,"
+
         if dry_run:
+            if already_right:
+                logging.info(f"[DRY RUN] Would copy: {display_name}{copy_info}{level_str})")
+            else:
+                logging.info(f"[DRY RUN] Would convert: {display_name}{conv_info}{level_str}")
             logging.info(
                 f"[DRY RUN] Would merge: {os.path.basename(left_src)} + "
-                f"{os.path.basename(right_src)} → {display_name}{conv_info}"
+                f"{os.path.basename(right_src)} → {display_name}"
             )
             merged_count += 1
             continue
@@ -784,15 +826,24 @@ def merge_lr_pairs(source_pairs, dest_dir, config, unpaired=None):
         fmt_opts  = ["-b", depth_str]
         if is_float:
             fmt_opts += ["-e", "floating-point"]
-        effects = ["rate", "-v", str(target_rate)]
-        if not is_float:
-            effects += ["dither", "-s"]
-        sox_cmd = ["sox", "-M", left_src, right_src] + fmt_opts + [out_path] + effects
+        if already_right:
+            sox_cmd = ["sox", "-M", left_src, right_src] + fmt_opts + [out_path]
+        else:
+            effects = ["rate", "-v", str(target_rate)]
+            if not is_float:
+                effects += ["dither", "-s"]
+            sox_cmd = ["sox", "-M", left_src, right_src] + fmt_opts + [out_path] + effects
 
         try:
             result = subprocess.run(sox_cmd, capture_output=True, text=True)
             if result.returncode == 0:
-                logging.info(f"Merged: {display_name}{conv_info}")
+                if already_right:
+                    logging.info(f"Copied: {display_name}{copy_info}{level_str})")
+                else:
+                    logging.info(f"Converted: {display_name}{conv_info}{level_str}")
+                logging.info(f"Merged: {display_name}")
+                if config.get("auto_verify"):
+                    logging.info(f"Verified: {display_name}  \u2713")
                 merged_count += 1
                 merged_sources.append((left_src, right_src))
             else:
@@ -837,18 +888,30 @@ def merge_lr_pairs(source_pairs, dest_dir, config, unpaired=None):
 # Watch mode
 # ---------------------------------------------------------------------------
 
-def is_file_stable(file_path, wait_sec):
-    last_size = os.path.getsize(file_path)
-    start_time = time.time()
-    while time.time() - start_time < wait_sec * 2:
-        time.sleep(10)
-        current_size = os.path.getsize(file_path)
-        if current_size == last_size and time.time() - start_time >= wait_sec:
-            return True
-        elif current_size != last_size:
-            last_size = current_size
-            start_time = time.time()
-    return False
+def is_file_stable(file_path, stability_sec, poll_interval=2):
+    """
+    Poll until the file's size hasn't changed for stability_sec consecutive seconds.
+    Returns True when stable, False if the file disappears or shutdown is requested.
+    No hard timeout — keeps waiting as long as the file is still growing.
+    """
+    last_size = -1
+    stable_since = None
+    while True:
+        if shutdown_event and shutdown_event.is_set():
+            return False
+        try:
+            size = os.path.getsize(file_path)
+        except OSError:
+            return False  # file disappeared or became inaccessible
+        if size != last_size:
+            last_size = size
+            stable_since = time.time()
+        else:
+            if stable_since is None:
+                stable_since = time.time()
+            if time.time() - stable_since >= stability_sec:
+                return True
+        time.sleep(poll_interval)
 
 
 class WatchHandler(FileSystemEventHandler):
@@ -857,17 +920,116 @@ class WatchHandler(FileSystemEventHandler):
         self.rejects_log = rejects_log
         self.progress_log = progress_log
         self.dest_dir = dest_dir
+        self._pending      = set()   # paths currently in stability check
+        self._pending_lock = threading.Lock()
+        self._lr_waiting   = {}      # merge_key → (path, side, arrived_time) waiting for partner
+        self._lr_lock      = threading.Lock()
+        self._silence_sem  = threading.Semaphore(1)  # process one file/pair at a time — keeps log clean and avoids I/O contention
+        threading.Thread(target=self._check_waiting_pairs, daemon=True).start()
+
+    def _lr_partner(self, path):
+        """
+        If path matches 'stem L.ext' / 'stem R.ext' and combine_lr is enabled,
+        returns (partner_path, side, merge_key).  Otherwise (None, None, None).
+        """
+        if not self.config.get("combine_lr"):
+            return None, None, None
+        name, ext = os.path.splitext(os.path.basename(path))
+        directory = os.path.dirname(path)
+        if name.endswith(" L") or name.endswith(".L"):
+            stem    = name[:-2]
+            sep     = name[-2]   # ' ' or '.'
+            partner = os.path.join(directory, f"{stem}{sep}R{ext}")
+            return partner, "L", (directory, stem, ext.lower())
+        elif name.endswith(" R") or name.endswith(".R"):
+            stem    = name[:-2]
+            sep     = name[-2]   # ' ' or '.'
+            partner = os.path.join(directory, f"{stem}{sep}L{ext}")
+            return partner, "R", (directory, stem, ext.lower())
+        return None, None, None
+
+    def _handle(self, path):
+        """Stability-check then process a single file. Runs in a daemon thread."""
+        try:
+            stability_sec = self.config["stability_wait_sec"]
+            rel_detected  = os.path.relpath(path, self.config.get("source_dir", ""))
+            logging.info(f"New file: {rel_detected}")
+            if not is_file_stable(path, stability_sec):
+                return
+
+
+            partner_path, side, merge_key = self._lr_partner(path)
+
+            if merge_key is not None:
+                # --- L/R file ---
+                # Check if partner is already waiting; if so, merge immediately.
+                # If not, park ourselves and return — partner will trigger the merge.
+                with self._lr_lock:
+                    if merge_key in self._lr_waiting:
+                        waiting_path, waiting_side, _ = self._lr_waiting.pop(merge_key)
+                        do_merge = True
+                    else:
+                        self._lr_waiting[merge_key] = (path, side, time.time())
+                        do_merge = False
+                        rel = os.path.relpath(path, self.config.get("source_dir", ""))
+                        logging.info(f"L/R: {rel}  — waiting for partner")
+
+                if do_merge:
+                    left_path  = waiting_path if waiting_side == "L" else path
+                    right_path = path         if waiting_side == "L" else waiting_path
+                    _, ext = os.path.splitext(os.path.basename(path))
+                    stem   = os.path.splitext(os.path.basename(left_path))[0][:-2]  # strip " L"
+                    root   = os.path.dirname(path)
+                    pair   = (left_path, right_path, stem, ext.lower(), root)
+                    with self._silence_sem:
+                        merge_lr_pairs([pair], self.dest_dir, self.config, unpaired=None)
+                # else: parked — partner's _handle will call merge when it arrives
+            else:
+                # Regular file — process normally
+                with self._silence_sem:
+                    process_file(path, self.config, self.rejects_log, self.progress_log, self.dest_dir)
+
+        except Exception as e:
+            rel = os.path.relpath(path, self.config.get("source_dir", path))
+            logging.error(f"Error processing {rel}: {e}")
+        finally:
+            with self._pending_lock:
+                self._pending.discard(path)
+
+    def _check_waiting_pairs(self):
+        """Daemon thread: every 15s warn about L/R files still waiting for their partner."""
+        while not (shutdown_event and shutdown_event.is_set()):
+            time.sleep(15)
+            if shutdown_event and shutdown_event.is_set():
+                break
+            now = time.time()
+            with self._lr_lock:
+                snapshot = list(self._lr_waiting.items())
+            for merge_key, (path, side, arrived) in snapshot:
+                elapsed = now - arrived
+                if elapsed >= 15:
+                    rel          = os.path.relpath(path, self.config.get("source_dir", ""))
+                    partner_side = "R" if side == "L" else "L"
+                    logging.warning(
+                        f"Waiting for partner: {rel}  — no {partner_side} side seen yet ({elapsed:.0f}s)"
+                    )
+
+    def report_unpaired(self):
+        """Log any L/R files still waiting for a partner at shutdown."""
+        with self._lr_lock:
+            for (directory, stem, ext), (path, side, _) in self._lr_waiting.items():
+                rel = os.path.relpath(path, self.config.get("source_dir", ""))
+                logging.warning(f"Unpaired L/R — no matching partner: {rel}  (held back)")
 
     def on_created(self, event):
         if shutdown_event and shutdown_event.is_set():
             return
         if not event.is_directory and is_audio_file(event.src_path):
-            logging.info(f"New file detected: {event.src_path}")
-            if is_file_stable(event.src_path, self.config["stability_wait_sec"]):
-                process_file(
-                    event.src_path, self.config, self.rejects_log,
-                    self.progress_log, self.dest_dir
-                )
+            with self._pending_lock:
+                if event.src_path in self._pending:
+                    return  # already waiting on this file
+                self._pending.add(event.src_path)
+            threading.Thread(target=self._handle, args=(event.src_path,), daemon=True).start()
 
     def on_modified(self, event):
         self.on_created(event)
@@ -896,7 +1058,7 @@ def signal_handler(sig, frame):
     if shutdown_event:
         shutdown_event.set()
     terminate_processes()
-    sys.exit(0)
+    sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -910,7 +1072,8 @@ def main():
 
     config = load_config(args.config)
     _, run_ts = setup_logging(config["log_dir"], config.get("verbose", False), config.get("dry_run", False))
-    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGINT,  signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
     source_name = os.path.basename(os.path.normpath(config["source_dir"]))
     target_rate = config.get("target_sample_rate", 48000)
@@ -947,6 +1110,7 @@ def main():
         finally:
             observer.stop()
             observer.join()
+            handler.report_unpaired()
     else:
         logging.info(f"Session: {source_name}  →  {suffix}")
         files = collect_files(config["source_dir"])

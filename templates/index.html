@@ -335,7 +335,7 @@
     .dot.running { background: var(--accent); animation: pulse 1.1s ease-in-out infinite; }
     .dot.done    { background: var(--success); }
     .dot.error   { background: var(--error); }
-    .dot.stopped { background: var(--muted); }
+    .dot.stopped { background: rgba(200,80,80,0.75); }
     .dot.dry-run { background: var(--accent); }
 
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.2} }
@@ -421,6 +421,18 @@
       line-height: 1.5;
       white-space: pre-line;
     }
+    .watch-lr-note {
+      margin-top: 8px;
+      padding: 9px 13px;
+      background: rgba(240, 160, 48, 0.08);
+      border: 1px solid rgba(240, 160, 48, 0.25);
+      border-left: 3px solid var(--warn);
+      border-radius: var(--radius);
+      font-size: 12px;
+      color: var(--warn);
+      line-height: 1.5;
+    }
+    .watch-lr-icon { margin-right: 7px; font-size: 13px; }
 
     /* ── Completion banner ─────────────────────────────────────── */
     .orphan-banner {
@@ -457,7 +469,7 @@
     }
     .completion-banner.done     { background: rgba(80,200,120,0.07);  border: 1px solid rgba(80,200,120,0.2); }
     .completion-banner.error    { background: rgba(200,80,80,0.07);   border: 1px solid rgba(200,80,80,0.2); }
-    .completion-banner.stopped  { background: rgba(140,140,140,0.07); border: 1px solid rgba(140,140,140,0.2); }
+    .completion-banner.stopped  { background: rgba(200,80,80,0.07);  border: 1px solid rgba(200,80,80,0.2); }
     .completion-banner.dry-run  { background: rgba(240,160,48,0.07);  border: 1px solid rgba(240,160,48,0.2); }
     .completion-icon {
       font-size: 36px;
@@ -690,10 +702,12 @@
       border-radius: 20px;
       font-family: var(--mono);
     }
-    .badge-rejected { background: rgba(200,90,90,0.15); color: var(--error); border: 1px solid rgba(200,90,90,0.3); }
-    .badge-skipped  { background: rgba(80,80,80,0.2);   color: #666;         border: 1px solid #333; }
-    .badge-merged    { background: rgba(33,150,243,0.15);  color: #2196f3;         border: 1px solid rgba(33,150,243,0.35); }
-    .badge-unpaired  { background: rgba(212,148,40,0.15);  color: var(--warn);     border: 1px solid rgba(212,148,40,0.35); }
+    .badge-converted { background: rgba(80,180,80,0.12);  color: var(--success);  border: 1px solid rgba(80,180,80,0.3); }
+    .badge-copied    { background: rgba(80,180,80,0.12);  color: var(--success);  border: 1px solid rgba(80,180,80,0.3); }
+    .badge-rejected  { background: rgba(200,90,90,0.15);  color: var(--error);    border: 1px solid rgba(200,90,90,0.3); }
+    .badge-skipped   { background: rgba(80,80,80,0.2);    color: #666;            border: 1px solid #333; }
+    .badge-merged    { background: rgba(33,150,243,0.15); color: #2196f3;         border: 1px solid rgba(33,150,243,0.35); }
+    .badge-unpaired  { background: rgba(212,148,40,0.15); color: var(--warn);     border: 1px solid rgba(212,148,40,0.35); }
     .review-list li.merged   { color: #2196f3; }
     .review-list li.unpaired { color: var(--warn); }
     .review-label-warn { color: var(--warn); }
@@ -869,11 +883,6 @@
 
     <div class="row">
       <div class="field">
-        <label class="field-label">Workers</label>
-        <input type="number" id="max_workers" min="1" max="16" value="6">
-        <div class="hint">Parallel conversions. Start at <code>6</code> — lower if the NAS feels sluggish, raise if your Mac is idle.</div>
-      </div>
-      <div class="field">
         <label class="field-label" for="dry_run">Dry Run</label>
         <input type="checkbox" id="dry_run" style="margin-top:5px;">
         <div class="hint">Simulates the run without writing any files. Shows exactly what would be converted, skipped, or rejected — useful before committing a large batch.</div>
@@ -887,6 +896,13 @@
         <label class="field-label" for="combine_lr">Combine L/R Pairs</label>
         <input type="checkbox" id="combine_lr" style="margin-top:5px;" onchange="toggleUnpairedOption()">
         <div class="hint">Merge Pro Tools mono L/R pairs (e.g. <code>Kick L.wav</code> + <code>Kick R.wav</code>) into a single stereo file. Unpaired files are blocked by default.</div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label class="field-label" for="watch_mode">Watch Mode</label>
+        <input type="checkbox" id="watch_mode" onchange="toggleWatchFields()" style="margin-top:5px;">
+        <div class="hint">Continuously monitor the source folder and process new files as they appear, instead of a one-time batch run.</div>
       </div>
     </div>
 
@@ -936,7 +952,11 @@
             <input type="number" id="min_non_silent_len" value="10">
             <div class="hint">Shortest blip that keeps a file from being rejected. Default: <code>10</code> ms.</div>
           </div>
-          <div class="field"></div>
+          <div class="field">
+            <label class="field-label">Workers</label>
+            <input type="number" id="max_workers" min="1" max="16" value="6">
+            <div class="hint">Parallel conversions. Start at <code>6</code> — lower if the NAS feels sluggish, raise if your Mac is idle.</div>
+          </div>
         </div>
 
         <!-- L/R Options -->
@@ -950,29 +970,18 @@
           </div>
         </div>
 
-        <!-- Watch Mode -->
+        <!-- Watch Mode / Notifications -->
         <div class="adv-section">
-          <!-- Notifications -->
-          <div class="adv-section">
-            <div class="field">
-              <label class="field-label">Slack Webhook URL</label>
-              <input type="text" id="slack_webhook_url"
-                     placeholder="https://hooks.slack.com/services/…">
-              <div class="hint">Post a message to Slack when a job finishes. Paste your Incoming Webhook URL here. Leave blank to disable. <a href="https://api.slack.com/messaging/webhooks" target="_blank" rel="noopener" style="color:var(--accent)">How to create one →</a></div>
-            </div>
+          <div class="field" id="field_stability_wait" style="display:none">
+            <label class="field-label">Stability Wait (sec)</label>
+            <input type="number" id="stability_wait_sec" value="60">
+            <div class="hint">Seconds the file size must be unchanged before processing begins. Prevents picking up files still being written (e.g. Pro Tools bounces). Default: <code>60</code>.</div>
           </div>
-
-          <div class="row">
-            <div class="field">
-              <label class="field-label" for="watch_mode">Watch Mode</label>
-              <input type="checkbox" id="watch_mode" onchange="toggleWatchFields()" style="margin-top:5px;">
-              <div class="hint">Continuously monitor the source folder and process new files as they appear, instead of a one-time batch run.</div>
-            </div>
-            <div class="field" id="field_stability_wait" style="visibility:hidden">
-              <label class="field-label">Stability Wait (sec)</label>
-              <input type="number" id="stability_wait_sec" value="60">
-              <div class="hint">Seconds a file must be unchanged before processing. Default: <code>60</code>.</div>
-            </div>
+          <div class="field">
+            <label class="field-label">Slack Webhook URL</label>
+            <input type="text" id="slack_webhook_url"
+                   placeholder="https://hooks.slack.com/services/…">
+            <div class="hint">Post a message to Slack when a job finishes. Paste your Incoming Webhook URL here. Leave blank to disable. <a href="https://api.slack.com/messaging/webhooks" target="_blank" rel="noopener" style="color:var(--accent)">How to create one →</a></div>
           </div>
         </div>
 
@@ -1013,6 +1022,10 @@
         Safe to close this tab — keep Terminal open while converting.
         If interrupted, re-run to resume where it left off.
       </div>
+    </div>
+    <div class="watch-lr-note hidden" id="watch-lr-note">
+      <span class="watch-lr-icon">⚠</span>
+      Any L/R files without a matching partner will be reported in File Review when you stop.
     </div>
 
   </div>
@@ -1059,9 +1072,11 @@
 
     <div class="review-header">
       <h2>File Review</h2>
-      <span class="badge badge-rejected" id="badge-rejected">0 rejected</span>
-      <span class="badge badge-skipped"  id="badge-skipped">0 skipped</span>
+      <span class="badge badge-converted" id="badge-converted" style="display:none">0 converted</span>
+      <span class="badge badge-copied"    id="badge-copied"    style="display:none">0 copied</span>
       <span class="badge badge-merged"    id="badge-merged"    style="display:none">0 merged</span>
+      <span class="badge badge-rejected"  id="badge-rejected"  style="display:none">0 rejected</span>
+      <span class="badge badge-skipped"   id="badge-skipped"   style="display:none">0 skipped</span>
       <span class="badge badge-unpaired"  id="badge-unpaired"  style="display:none">0 unpaired</span>
     </div>
 
@@ -1109,9 +1124,9 @@
       <h2>Run History</h2>
       <span class="badge badge-skipped" id="history-badge" style="margin-left:auto"></span>
       <button class="btn-reset" id="btn-clear-history" onclick="event.stopPropagation(); clearHistory()" style="font-size:11px; padding:3px 8px; margin-left:8px;">Clear</button>
-      <span id="history-toggle-icon" style="color:var(--text-dim); font-size:12px; margin-left:8px;">▾</span>
+      <span id="history-toggle-icon" style="color:var(--text); font-size:18px; margin-left:10px; line-height:1;">▸</span>
     </div>
-    <div id="history-body">
+    <div id="history-body" style="display:none">
       <div class="review-scroll" style="max-height:320px;">
         <table id="history-table" style="width:100%; border-collapse:collapse; font-size:12px;">
           <tbody id="history-rows"></tbody>
@@ -1135,6 +1150,8 @@
   const btnRun       = document.getElementById('btn-run');
   const btnStop      = document.getElementById('btn-stop');
   const reviewCard      = document.getElementById('review-card');
+  const badgeConverted  = document.getElementById('badge-converted');
+  const badgeCopied     = document.getElementById('badge-copied');
   const rejectedList    = document.getElementById('rejected-list');
   const skippedList     = document.getElementById('skipped-list');
   const badgeRejected   = document.getElementById('badge-rejected');
@@ -1160,6 +1177,7 @@
   let totalFiles = 0, liveDoneCount = 0;
   let _verifyIssues = null;
   let _activityTimer = null;
+  let _isWatchMode = false;
 
   function updatePhase() {
     if (totalFiles === 0) return;
@@ -1170,6 +1188,7 @@
   }
 
   function _resetActivityTimer() {
+    if (_isWatchMode) return;   // watch mode is idle by design — no stall detection needed
     if (_activityTimer) clearTimeout(_activityTimer);
     _activityTimer = setTimeout(() => {
       const atEnd = totalFiles > 0 && liveDoneCount >= totalFiles;
@@ -1274,7 +1293,7 @@
 
   function toggleWatchFields() {
     const on = document.getElementById('watch_mode').checked;
-    document.getElementById('field_stability_wait').style.visibility = on ? 'visible' : 'hidden';
+    document.getElementById('field_stability_wait').style.display = on ? '' : 'none';
   }
 
   async function saveDefaults() {
@@ -1351,8 +1370,12 @@
     rejectedCount = 0; skippedCount = 0; convertedCount = 0; copiedCount = 0; mergedCount = 0; unpairedCount = 0;
     totalFiles = 0; liveDoneCount = 0;
     _clearActivityTimer();
-    badgeRejected.textContent = '0 rejected';
-    badgeSkipped.textContent  = '0 skipped';
+    _isWatchMode = false;
+    document.getElementById('watch-lr-note').classList.add('hidden');
+    badgeConverted.style.display = 'none';
+    badgeCopied.style.display    = 'none';
+    badgeRejected.style.display  = 'none';
+    badgeSkipped.style.display  = 'none';
     badgeMerged.style.display   = 'none';
     mergedSection.style.display = 'none';
     badgeUnpaired.style.display   = 'none';
@@ -1369,6 +1392,23 @@
     setStatus('', '');
     btnRun.disabled = false;
     btnStop.disabled = true;
+    setWatchLocked(false);
+  }
+
+  const _WATCH_LOCK_IDS = [
+    'source_dir', 'dest_base', 'run_mode',
+    'target_sample_rate', 'bit_depth', 'max_workers',
+    'dry_run', 'force_wav', 'combine_lr', 'allow_unpaired_lr',
+    'silence_thresh', 'min_non_silent_len', 'verbose', 'auto_verify',
+    'watch_mode', 'stability_wait_sec'
+  ];
+
+  function setWatchLocked(locked) {
+    _WATCH_LOCK_IDS.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = locked;
+    });
+    document.querySelectorAll('.btn-browse').forEach(btn => btn.disabled = locked);
   }
 
   logEl.addEventListener('scroll', () => {
@@ -1404,10 +1444,12 @@
     if (m.includes('[dry run] would merge:'))                return 'merged';
     if (m.includes('[dry run]'))                             return 'dry-run';
     if (m.includes('error') || m.includes('failed'))        return 'error';
-    if (m.startsWith('verify:') && msg.includes('\u2717'))  return 'error';
+    if (m.startsWith('verified:') && msg.includes('\u2717')) return 'error';
     if (m.includes('verification found issues'))            return 'warn';
-    if (m.startsWith('verify:') && msg.includes('\u2713'))  return 'dim';
-    if (m.includes('unpaired l/r') || m.includes('held back')) return 'warn';
+    if (m.startsWith('verified:') && msg.includes('\u2713')) return 'success';
+    if (m.startsWith('verify:')  && msg.includes('\u2717')) return 'error';
+    if (m.startsWith('verify:')  && msg.includes('\u2713')) return 'dim';
+    if (m.includes('unpaired l/r') || m.includes('held back') || m.startsWith('waiting for partner:') || m.startsWith('note:')) return 'warn';
     if (m.startsWith('unprocessed:'))                       return 'warn';
     if (m.includes('warning') || m.includes('warn'))        return 'warn';
     if (m.startsWith('converted:') || m.includes('passed')) return 'success';
@@ -1448,6 +1490,7 @@
     if (type === 'rejected') {
       rejectedCount++;
       badgeRejected.textContent = rejectedCount + ' rejected';
+      badgeRejected.style.display = '';
     } else if (type === 'merged') {
       mergedCount++;
       badgeMerged.textContent = mergedCount + ' merged';
@@ -1461,6 +1504,7 @@
     } else {
       skippedCount++;
       badgeSkipped.textContent = skippedCount + ' skipped';
+      badgeSkipped.style.display = '';
     }
     reviewCard.classList.remove('hidden');
   }
@@ -1477,10 +1521,16 @@
       addReviewItem(msg, 'skipped');
     } else if (m.includes('unpaired l/r')) {
       addReviewItem(msg, 'unpaired');
-    } else if (m.includes('copied (already at target') || m.includes('[dry run] would copy')) {
+    } else if (m.startsWith('copied:') || m.includes('[dry run] would copy')) {
       copiedCount++;
+      badgeCopied.textContent = copiedCount + ' copied';
+      badgeCopied.style.display = '';
+      reviewCard.classList.remove('hidden');
     } else if (m.includes('converted:') || m.includes('[dry run] would convert:')) {
       convertedCount++;
+      badgeConverted.textContent = convertedCount + ' converted';
+      badgeConverted.style.display = '';
+      reviewCard.classList.remove('hidden');
     }
   }
 
@@ -1499,20 +1549,14 @@
     } else {
       subEl.textContent = '';
     }
-    let stats =
-      `<span class="cs-converted">${converted} converted</span>`;
-    if (copied > 0) {
-      stats += `<span class="cs-sep">·</span><span class="cs-copied">${copied} copied</span>`;
-    }
-    if (merged > 0) {
-      stats += `<span class="cs-sep">·</span><span class="cs-merged">${merged} merged</span>`;
-    }
-    stats +=
-      `<span class="cs-sep">·</span>` +
-      `<span class="cs-rejected">${rejected} silent</span>` +
-      `<span class="cs-sep">·</span>` +
-      `<span class="cs-skipped">${skipped} skipped</span>`;
-    completionStats.innerHTML = stats;
+    const _sep = '<span class="cs-sep">·</span>';
+    const _statParts = [];
+    if (converted > 0) _statParts.push(`<span class="cs-converted">${converted} converted</span>`);
+    if (copied    > 0) _statParts.push(`<span class="cs-copied">${copied} copied</span>`);
+    if (merged    > 0) _statParts.push(`<span class="cs-merged">${merged} merged</span>`);
+    if (rejected  > 0) _statParts.push(`<span class="cs-rejected">${rejected} silent</span>`);
+    if (skipped   > 0) _statParts.push(`<span class="cs-skipped">${skipped} skipped</span>`);
+    completionStats.innerHTML = _statParts.join(_sep);
     if (unpaired > 0) {
       const noun = unpaired === 1 ? 'file' : 'files';
       unpairedWarning.textContent = `⚠  ${unpaired} L/R ${noun} held back — no partner found`;
@@ -1612,6 +1656,7 @@
       return;
     }
 
+    if (cfg.watch_mode) setWatchLocked(true);
     connectStream();
   }
 
@@ -1628,12 +1673,19 @@
     es.onmessage = (e) => {
       const data = JSON.parse(e.data);
       if (data.type === 'log') {
-        _resetActivityTimer();
         const cleanMsg = data.message.replace(_logPrefixRe, '');
+        const ml = cleanMsg.toLowerCase();
+        if (ml.startsWith('watch mode — monitoring')) {
+          _isWatchMode = true;
+          _clearActivityTimer();
+          const combineLr = document.getElementById('combine_lr')?.checked;
+          if (combineLr) {
+            document.getElementById('watch-lr-note').classList.remove('hidden');
+          }
+        }
+        _resetActivityTimer();
         addLine(cleanMsg, classify(cleanMsg));
         checkReviewLine(cleanMsg);
-        // Phase tracking
-        const ml = cleanMsg.toLowerCase();
         if (!totalFiles) {
           const m = ml.match(/found (\d+) audio files/);
           if (m) {
@@ -1669,8 +1721,13 @@
         const statusTxt = isDryRun ? 'Dry Run' : baseLabel;
         const dotState  = isDryRun ? 'dry-run' : (ok ? 'done' : (stopped ? 'stopped' : 'error'));
         setStatus(dotState, statusTxt);
-        showCompletion(data.job_name || '', jobStatus, convertedCount, copiedCount, mergedCount, unpairedCount, rejectedCount, skippedCount, isDryRun);
-        lastRunChip.classList.add('hidden'); // banner replaces chip while visible
+        if (_isWatchMode) {
+          // Watch mode: show stopped banner with no stats — File Review has the tally
+          showCompletion(data.job_name || '', jobStatus, 0, 0, 0, 0, 0, 0, isDryRun);
+        } else {
+          showCompletion(data.job_name || '', jobStatus, convertedCount, copiedCount, mergedCount, unpairedCount, rejectedCount, skippedCount, isDryRun);
+          lastRunChip.classList.add('hidden');
+        }
         phaseRow.classList.add('hidden');
         btnRun.disabled = false; btnStop.disabled = true;
         es.close(); es = null;
@@ -1760,7 +1817,7 @@
   // ---------------------------------------------------------------------------
   // Run History
   // ---------------------------------------------------------------------------
-  let _historyOpen = true;
+  let _historyOpen = false;
 
   function toggleHistory() {
     _historyOpen = !_historyOpen;
@@ -1791,11 +1848,13 @@
           ? new Date(job.finished_at).toLocaleString([], {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})
           : '';
 
-        let stats = `<span class="cs-converted">${job.converted ?? '?'} converted</span>`;
-        if (job.copied  > 0) stats += ` <span class="cs-sep">·</span> <span class="cs-copied">${job.copied} copied</span>`;
-        if (job.merged  > 0) stats += ` <span class="cs-sep">·</span> <span class="cs-merged">${job.merged} merged</span>`;
-        stats += ` <span class="cs-sep">·</span> <span class="cs-rejected">${job.rejected ?? 0} silent</span>`;
-        stats += ` <span class="cs-sep">·</span> <span class="cs-skipped">${job.skipped ?? 0} skipped</span>`;
+        const _hp = [];
+        if ((job.converted ?? 0) > 0) _hp.push(`<span class="cs-converted">${job.converted} converted</span>`);
+        if ((job.copied    ?? 0) > 0) _hp.push(`<span class="cs-copied">${job.copied} copied</span>`);
+        if ((job.merged    ?? 0) > 0) _hp.push(`<span class="cs-merged">${job.merged} merged</span>`);
+        if ((job.rejected  ?? 0) > 0) _hp.push(`<span class="cs-rejected">${job.rejected} silent</span>`);
+        if ((job.skipped   ?? 0) > 0) _hp.push(`<span class="cs-skipped">${job.skipped} skipped</span>`);
+        const stats = _hp.join(' <span class="cs-sep">·</span> ') || '<span style="color:var(--text-dim)">—</span>';
 
         const tr = document.createElement('tr');
         tr.innerHTML =
@@ -1826,7 +1885,9 @@
     addLine('— Stopped by user —', 'warn');
     setStatus('', 'Stopped');
     btnRun.disabled = false; btnStop.disabled = true;
-    if (es) { es.close(); es = null; }
+    setWatchLocked(false);
+    // Do NOT close SSE here — auto-verify runs after stop and emits before done.
+    // The done event handler closes the stream naturally.
   }
 
   // ---------------------------------------------------------------------------
